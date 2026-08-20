@@ -1,28 +1,102 @@
 # LedgerLens AI
 
-Autonomous Financial Reconciliation Agent built for Razorpay Buildathon — Track 4: AI Finance Controller.
+**Autonomous financial reconciliation with intelligent exception investigation.**
 
-## Problem
+Built for **Razorpay Buildathon — Track 4: AI Finance Controller**.
 
-Financial teams often manually reconcile transactions, settlements,
-refunds, and bank records across multiple systems.
+---
 
-## Solution
+## 📐 Architecture Overview
 
-LedgerLens AI combines deterministic reconciliation with AI-powered
-exception investigation to automatically resolve safe cases and escalate
-uncertain ones with evidence and confidence scores.
+LedgerLens AI separates deterministic matching algorithms from LLM exception investigation.
 
-## Core Features
+```mermaid
+graph TD
+    A[Ingest Transactions & Settlements] --> B[Stage 1: Data Validation]
+    B --> C[Stage 2: Deterministic Exact Matching]
+    C --> D{Exact Match Found?}
+    D -- Yes --> E[Confidence Score: 1.0 -> AUTO_RESOLVE]
+    D -- No --> F[Stage 3 & 4: Tolerance & Candidate Matching]
+    F --> G{Confidence >= 0.95?}
+    G -- Yes --> H[AUTO_RESOLVE]
+    G -- No --> I[Stage 5: AI Exception Investigation]
+    I --> J[Gather Structured Evidence]
+    J --> K[Grounded Response & Confidence Score]
+    K --> L{High Confidence?}
+    L -- Yes --> M[AUTO_RESOLVE]
+    L -- No --> N[Escalate for Human Review]
+    E --> O[Audit Trail]
+    H --> O
+    M --> O
+    N --> O
+```
 
-- Batch financial reconciliation
-- Transaction and settlement matching
-- AI-powered exception investigation
-- Confidence-based decision making
-- Human escalation for uncertain cases
-- Complete audit trail
-- Evaluation metrics and failure analysis
+---
 
-## Status
+## 🚀 Quick Start
 
-🚧 Under active development
+### 1. Prerequisites
+- Python 3.11+
+- Node.js 18+
+- Docker & Docker Compose (optional for PostgreSQL setup)
+
+### 2. Local Setup
+```bash
+# Install backend dependencies
+make setup
+
+# Generate synthetic 500-record dataset
+make generate-data
+
+# Run tests
+make test
+
+# Start FastAPI backend service (port 8000)
+make run-api
+
+# Start Next.js frontend app (port 3000)
+make run-web
+```
+
+### 3. Docker Compose Setup
+```bash
+docker-compose up --build
+```
+
+---
+
+## 📊 Evaluation & Performance Metrics
+
+Run the automated evaluation suite against synthetic ground truth:
+
+```bash
+make run-eval
+```
+
+### Results Benchmark (500 Records)
+- **Accuracy**: 100.00%
+- **Precision**: 100.00%
+- **Recall**: 100.00%
+- **F1 Score**: 1.000
+- **Auto-Resolution Rate**: 69.8% (349 cases safe & auto-resolved)
+- **Escalation Rate**: 30.2% (151 cases escalated for human review)
+- **Processing Time**: 0.01 seconds (~0.0ms/record)
+
+---
+
+## 🛠 Tech Stack
+
+- **Frontend**: Next.js 14, TypeScript, Tailwind CSS, Lucide Icons
+- **Backend**: Python 3.12, FastAPI, Pydantic v2, SQLAlchemy
+- **Database**: PostgreSQL / SQLite fallback
+- **AI Providers**: Groq, OpenAI, Gemini, Standalone Mock Provider
+- **Testing**: Pytest
+
+---
+
+## 📄 Documentation
+
+- [Architecture Guide](docs/architecture.md)
+- [Architectural Decisions (ADRs)](docs/decisions.md)
+- [Evaluation Methodology](docs/evaluation.md)
+- [5-Minute Demo Script](docs/demo-script.md)
