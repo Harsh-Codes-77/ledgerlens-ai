@@ -1,7 +1,7 @@
 import os
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
@@ -340,13 +340,20 @@ def get_exception(exception_id: str, db: Session = Depends(get_db)):
     }
 
     base_time = txn.transaction_date if txn else exc.created_at
+    t_captured = base_time
+    t_recon = base_time + timedelta(minutes=1)
+    t_search = base_time + timedelta(minutes=1)
+    t_dup = base_time + timedelta(minutes=1)
+    t_ai = base_time + timedelta(minutes=2)
+    t_status = base_time + timedelta(minutes=2)
+
     timeline = [
-        {"time": base_time.strftime("%H:%M"), "event": "Transaction captured"},
-        {"time": base_time.strftime("%H:%M"), "event": "Reconciliation started"},
-        {"time": base_time.strftime("%H:%M"), "event": "Exact reference search failed" if exc.exception_type != "exact" else "Exact reference search matched"},
-        {"time": base_time.strftime("%H:%M"), "event": "Duplicate check passed"},
-        {"time": exc.created_at.strftime("%H:%M"), "event": "AI investigation completed"},
-        {"time": exc.created_at.strftime("%H:%M"), "event": f"Case status: {exc.status}"}
+        {"time": t_captured.strftime("%H:%M"), "event": "Transaction captured"},
+        {"time": t_recon.strftime("%H:%M"), "event": "Reconciliation started"},
+        {"time": t_search.strftime("%H:%M"), "event": "Exact reference search failed" if exc.exception_type != "exact" else "Exact reference search matched"},
+        {"time": t_dup.strftime("%H:%M"), "event": "Duplicate check passed"},
+        {"time": t_ai.strftime("%H:%M"), "event": "AI investigation completed"},
+        {"time": t_status.strftime("%H:%M"), "event": f"Case status: {exc.status}"}
     ]
 
     schema_data = ExceptionCaseSchema.model_validate(exc)
