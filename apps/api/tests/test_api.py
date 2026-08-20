@@ -37,3 +37,26 @@ def test_batch_lifecycle():
     eval_resp = client.get(f"/api/evaluation/{batch_id}")
     assert eval_resp.status_code == 200
     assert eval_resp.json()["total_records"] == 50
+
+def test_exception_action_audit_logging():
+    # Create and process batch to get exceptions
+    resp = client.post("/api/batches", json={"name": "Audit Test Batch", "use_demo_data": True, "record_count": 20})
+    batch_id = resp.json()["id"]
+    client.post(f"/api/batches/{batch_id}/process")
+
+    exceptions = client.get("/api/exceptions").json()
+    assert len(exceptions) > 0
+    exc_id = exceptions[0]["id"]
+
+    # Approve exception
+    app_resp = client.post(f"/api/exceptions/{exc_id}/approve", json={"action": "approve", "notes": "Approved by test operator", "actor_id": "test_operator"})
+    assert app_resp.status_code == 200
+    assert app_resp.json()["status"] == "APPROVED"
+
+    # Verify audit log recorded event
+    logs_resp = client.get("/api/audit-logs")
+    assert logs_resp.status_code == 200
+    logs = logs_resp.json()
+    action_logs = [l for l in logs if l["entity_id"] == exc_id and l["action"] == "HUMAN_APPROVE"]
+    assert len(action_logs) > 0
+    assert action_logs[0]["actor_id"] == "test_operator"

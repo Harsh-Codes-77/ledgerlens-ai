@@ -44,6 +44,7 @@ def create_audit_entry(
         metadata_json=metadata_json
     )
     db.add(audit)
+    db.commit()
 
 @router.get("/health")
 def health_check():
@@ -379,9 +380,10 @@ def approve_exception(exception_id: str, req: ResolutionActionRequest, db: Sessi
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_APPROVE",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "APPROVED"},
-        reason=req.notes
+        reason=req.notes or "Recommendation approved by operator."
     )
-    return exc
+
+    return get_exception(exception_id, db)
 
 @router.post("/exceptions/{exception_id}/reject", response_model=ExceptionCaseSchema)
 def reject_exception(exception_id: str, req: ResolutionActionRequest, db: Session = Depends(get_db)):
@@ -400,9 +402,10 @@ def reject_exception(exception_id: str, req: ResolutionActionRequest, db: Sessio
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_REJECT",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "REJECTED"},
-        reason=req.notes
+        reason=req.notes or "Recommendation rejected by operator."
     )
-    return exc
+
+    return get_exception(exception_id, db)
 
 @router.post("/exceptions/{exception_id}/escalate", response_model=ExceptionCaseSchema)
 def escalate_exception(exception_id: str, req: ResolutionActionRequest, db: Session = Depends(get_db)):
@@ -421,9 +424,10 @@ def escalate_exception(exception_id: str, req: ResolutionActionRequest, db: Sess
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_ESCALATE",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "ESCALATED"},
-        reason=req.notes
+        reason=req.notes or "Escalated to senior finance controller."
     )
-    return exc
+
+    return get_exception(exception_id, db)
 
 # --- TRANSACTIONS & SETTLEMENTS ---
 
