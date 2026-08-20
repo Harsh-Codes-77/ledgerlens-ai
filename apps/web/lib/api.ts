@@ -52,6 +52,25 @@ export interface ExceptionCase {
   assigned_to?: string;
   resolved_by?: string;
   resolution_notes?: string;
+  transaction_details?: {
+    external_transaction_id: string;
+    amount: number;
+    currency: string;
+    status: string;
+    transaction_date: string;
+    payment_reference?: string;
+    source?: string;
+  };
+  settlement_search?: {
+    records_checked: number;
+    matching_reference: string;
+    closest_amount_match: string;
+    closest_date_diff: string;
+  };
+  timeline?: Array<{
+    time: string;
+    event: string;
+  }>;
   created_at: string;
   updated_at: string;
 }

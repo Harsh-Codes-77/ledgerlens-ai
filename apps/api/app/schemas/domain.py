@@ -66,6 +66,9 @@ class ExceptionCaseSchema(BaseModel):
     assigned_to: Optional[str] = None
     resolved_by: Optional[str] = None
     resolution_notes: Optional[str] = None
+    transaction_details: Optional[Dict[str, Any]] = None
+    settlement_search: Optional[Dict[str, Any]] = None
+    timeline: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
     updated_at: datetime
 
