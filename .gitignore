@@ -11,5 +11,9 @@ node_modules/
 build/
 dist/
 
+# Generated Data & DB
+data/generated/
+*.db
+
 # OS
 .DS_Store
