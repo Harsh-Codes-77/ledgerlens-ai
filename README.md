@@ -205,14 +205,14 @@ flowchart LR
     B --> C[Display Metrics Summary]
     C --> C1[Dataset Size: 500 Records]
     C --> C2[Match Accuracy: 100.0%]
-    C --> C3[Precision: 100.0% | Recall: 100.0% | F1: 1.000]
+    C --> C3["Precision: 100.0% - Recall: 100.0% - F1: 1.000"]
     C --> C4[Auto-Resolution Rate: 69.8%]
     C --> C5[Escalation Rate: 30.2%]
     
     B --> D[Render Known Failure Analysis Table]
-    D --> D1[Duplicate Bank Callbacks -> Escalated]
-    D --> D2[Corrupted Negative Amounts -> Invalid Exception]
-    D --> D3[Missing Settlements -> AI Investigated & Escalated]
+    D --> D1["Duplicate Bank Callbacks -> Escalated"]
+    D --> D2["Corrupted Negative Amounts -> Invalid Exception"]
+    D --> D3["Missing Settlements -> AI Investigated & Escalated"]
 ```
 
 ---
