@@ -1,10 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Header from "@/components/Header";
-import { fetchApi, Batch, ExceptionCase } from "@/lib/api";
-import { CheckCircle2, AlertTriangle, ArrowUpRight, Play, ShieldAlert, Zap } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import TopBar from "@/components/Header";
+import { fetchApi, Batch, ExceptionCase } from "@/lib/api";
+import { MetricCard } from "@/components/ui/metric-card";
+import { EmptyState, LoadingState } from "@/components/ui/states";
+import { ConfidenceRing } from "@/components/ui/confidence-ring";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Play,
+  CheckCircle2,
+  AlertTriangle,
+  Clock,
+  ArrowRight,
+  Cpu,
+  Layers,
+  ShieldCheck,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
+
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.06 } },
+};
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
+};
 
 export default function OverviewPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -19,9 +51,11 @@ export default function OverviewPage() {
   async function loadData() {
     try {
       setLoading(true);
-      const batchData = await fetchApi<Batch[]>("/api/batches");
+      const [batchData, excData] = await Promise.all([
+        fetchApi<Batch[]>("/api/batches"),
+        fetchApi<ExceptionCase[]>("/api/exceptions"),
+      ]);
       setBatches(batchData);
-      const excData = await fetchApi<ExceptionCase[]>("/api/exceptions");
       setExceptions(excData);
     } catch (e) {
       console.error(e);
@@ -41,11 +75,9 @@ export default function OverviewPage() {
           record_count: 500,
         }),
       });
-
       await fetchApi<Batch>(`/api/batches/${newBatch.id}/process`, {
         method: "POST",
       });
-
       await loadData();
     } catch (e) {
       console.error(e);
@@ -54,164 +86,342 @@ export default function OverviewPage() {
     }
   }
 
-  const latestBatch = batches[0];
-  const totalProcessed = batches.reduce((acc, b) => acc + b.total_records, 0);
-  const totalMatched = batches.reduce((acc, b) => acc + b.matched_count, 0);
-  const totalAutoResolved = batches.reduce((acc, b) => acc + b.auto_resolved_count, 0);
-  const pendingReview = exceptions.filter((e) => e.status === "PENDING_REVIEW" || e.status === "ESCALATED").length;
-  const matchRate = totalProcessed > 0 ? ((totalMatched / totalProcessed) * 100).toFixed(1) : "0.0";
+  const stats = useMemo(() => {
+    const totalProcessed = batches.reduce((a, b) => a + b.total_records, 0);
+    const totalMatched = batches.reduce((a, b) => a + b.matched_count, 0);
+    const totalAutoResolved = batches.reduce(
+      (a, b) => a + b.auto_resolved_count,
+      0
+    );
+    const totalEscalated = batches.reduce(
+      (a, b) => a + b.escalated_count,
+      0
+    );
+    const totalExceptions = batches.reduce(
+      (a, b) => a + b.exception_count,
+      0
+    );
+    const pendingReview = exceptions.filter(
+      (e) => e.status === "PENDING_REVIEW" || e.status === "ESCALATED"
+    ).length;
+    const matchRate =
+      totalProcessed > 0
+        ? ((totalMatched / totalProcessed) * 100).toFixed(1)
+        : "0.0";
+    const avgConfidence =
+      exceptions.length > 0
+        ? (
+            exceptions.reduce((a, e) => a + e.confidence_score, 0) /
+            exceptions.length
+          ).toFixed(0)
+        : "0";
+
+    return {
+      totalProcessed,
+      totalMatched,
+      totalAutoResolved,
+      totalEscalated,
+      totalExceptions,
+      pendingReview,
+      matchRate,
+      avgConfidence,
+      batchCount: batches.length,
+    };
+  }, [batches, exceptions]);
+
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col min-w-0">
+        <TopBar />
+        <LoadingState message="Loading financial intelligence..." />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <Header title="Reconciliation Overview" />
-
-      <main className="p-6 space-y-6 max-w-7xl">
-        {/* Top Control Bar */}
-        <div className="flex items-center justify-between bg-surface border border-surfaceBorder p-4 rounded">
-          <div>
-            <h3 className="font-semibold text-sm text-primaryText">Autonomous Recon Engine</h3>
-            <p className="text-xs text-secondaryText mt-0.5">
-              Deterministic matching active • Grounded AI exception investigation enabled
-            </p>
-          </div>
-          <button
-            onClick={handleRunDemo}
-            disabled={creating}
-            className="flex items-center space-x-2 bg-primaryText text-background px-4 py-2 rounded text-xs font-semibold hover:bg-neutral-200 transition-colors disabled:opacity-50"
+      <TopBar />
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-[1400px] mx-auto p-6 space-y-6">
+          {/* Command Center Header */}
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="flex flex-col md:flex-row md:items-end justify-between gap-4"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>{creating ? "Processing 500 Records..." : "Run 500-Record Demo Batch"}</span>
-          </button>
-        </div>
-
-        {/* Key Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-xs text-secondaryText font-mono uppercase">Total Processed</div>
-            <div className="text-2xl font-bold text-primaryText mt-2 font-mono">
-              {loading ? "..." : totalProcessed.toLocaleString()}
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">
+                Financial Operations
+              </h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {stats.batchCount > 0
+                  ? `${stats.batchCount} batch${stats.batchCount > 1 ? "es" : ""} processed across ${stats.totalProcessed.toLocaleString()} records`
+                  : "No reconciliation runs yet — start with a demo batch below."}
+              </p>
             </div>
-            <div className="text-[11px] text-secondaryText mt-1">Across {batches.length} batches</div>
-          </div>
+            <Button
+              onClick={handleRunDemo}
+              disabled={creating}
+              size="default"
+              className="shrink-0"
+            >
+              <Play className="h-3.5 w-3.5 mr-2 fill-current" />
+              {creating ? "Processing 500 Records..." : "Run Demo Batch"}
+            </Button>
+          </motion.div>
 
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-xs text-secondaryText font-mono uppercase">Match Rate</div>
-            <div className="text-2xl font-bold text-primaryText mt-2 font-mono">
-              {loading ? "..." : `${matchRate}%`}
-            </div>
-            <div className="text-[11px] text-positive flex items-center space-x-1 mt-1">
-              <CheckCircle2 className="w-3 h-3" />
-              <span>Deterministic & Tolerance</span>
-            </div>
-          </div>
+          {/* Metrics Grid */}
+          <motion.div
+            variants={stagger}
+            initial="hidden"
+            animate="show"
+            className="grid grid-cols-2 lg:grid-cols-4 gap-3"
+          >
+            <motion.div variants={fadeUp}>
+              <MetricCard
+                label="Total Processed"
+                value={stats.totalProcessed.toLocaleString()}
+                subtitle={`Across ${stats.batchCount} batches`}
+                icon={<Layers className="h-4 w-4" />}
+              />
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <MetricCard
+                label="Match Rate"
+                value={`${stats.matchRate}%`}
+                subtitle="Deterministic + tolerance"
+                icon={<CheckCircle2 className="h-4 w-4" />}
+              />
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <MetricCard
+                label="Auto-Resolved"
+                value={stats.totalAutoResolved.toLocaleString()}
+                subtitle="High-confidence cases"
+                icon={<Zap className="h-4 w-4" />}
+              />
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <MetricCard
+                label="Pending Review"
+                value={stats.pendingReview}
+                subtitle="Requires human decision"
+                icon={<AlertTriangle className="h-4 w-4" />}
+              />
+            </motion.div>
+          </motion.div>
 
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-xs text-secondaryText font-mono uppercase">Auto-Resolved</div>
-            <div className="text-2xl font-bold text-primaryText mt-2 font-mono">
-              {loading ? "..." : totalAutoResolved.toLocaleString()}
-            </div>
-            <div className="text-[11px] text-secondaryText mt-1">Safe high-confidence cases</div>
-          </div>
-
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-xs text-secondaryText font-mono uppercase">Pending Review</div>
-            <div className="text-2xl font-bold text-warning mt-2 font-mono">
-              {loading ? "..." : pendingReview}
-            </div>
-            <div className="text-[11px] text-secondaryText mt-1">Escalated for human oversight</div>
-          </div>
-        </div>
-
-        {/* Activity & Recent Exceptions Split */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Batches Table (2 Cols) */}
-          <div className="lg:col-span-2 bg-surface border border-surfaceBorder rounded p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-surfaceBorder pb-3">
-              <h3 className="text-xs font-semibold text-primaryText uppercase font-mono tracking-wider">Recent Batches</h3>
-              <Link href="/batches" className="text-xs text-secondaryText hover:text-primaryText flex items-center space-x-1">
-                <span>View All</span>
-                <ArrowUpRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            {batches.length === 0 ? (
-              <div className="py-8 text-center text-xs text-secondaryText font-mono">
-                No batches executed yet. Click "Run 500-Record Demo Batch" above to start.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-mono">
-                  <thead>
-                    <tr className="border-b border-surfaceBorder text-secondaryText">
-                      <th className="pb-2 font-normal">Batch Name</th>
-                      <th className="pb-2 font-normal">Records</th>
-                      <th className="pb-2 font-normal">Match Rate</th>
-                      <th className="pb-2 font-normal">Latency</th>
-                      <th className="pb-2 font-normal">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-surfaceBorder/50">
-                    {batches.slice(0, 5).map((b) => (
-                      <tr key={b.id} className="hover:bg-background/40">
-                        <td className="py-2.5 font-medium text-primaryText">
-                          <Link href={`/batches/${b.id}`} className="hover:underline">
-                            {b.name}
+          {/* Content Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Recent Batches */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="lg:col-span-2"
+            >
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle>Recent Runs</CardTitle>
+                  {batches.length > 0 && (
+                    <Link
+                      href="/batches"
+                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                    >
+                      View all
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  {batches.length === 0 ? (
+                    <EmptyState
+                      icon={<Layers className="h-5 w-5" />}
+                      title="No runs yet"
+                      description="Click 'Run Demo Batch' above to generate and reconcile 500 financial records."
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {batches.slice(0, 5).map((b, i) => (
+                        <motion.div
+                          key={b.id}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.3 + i * 0.05 }}
+                        >
+                          <Link
+                            href={`/batches/${b.id}`}
+                            className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-accent/50 transition-all group"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="h-8 w-8 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
+                                <Layers className="h-3.5 w-3.5 text-emerald-400" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate group-hover:text-foreground">
+                                  {b.name}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground font-mono">
+                                  {b.total_records} records ·{" "}
+                                  {b.processing_time_seconds}s
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <ConfidenceRing
+                                score={b.match_rate / 100}
+                                size="sm"
+                              />
+                              <Badge
+                                variant={
+                                  b.status === "COMPLETED"
+                                    ? "success"
+                                    : "warning"
+                                }
+                              >
+                                {b.status}
+                              </Badge>
+                            </div>
                           </Link>
-                        </td>
-                        <td className="py-2.5 text-secondaryText">{b.total_records}</td>
-                        <td className="py-2.5 text-primaryText">{b.match_rate}%</td>
-                        <td className="py-2.5 text-secondaryText">{b.processing_time_seconds}s</td>
-                        <td className="py-2.5">
-                          <span className="px-2 py-0.5 rounded text-[10px] bg-positive/10 text-positive border border-positive/20">
-                            {b.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Unresolved Exceptions Panel (1 Col) */}
-          <div className="bg-surface border border-surfaceBorder rounded p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-surfaceBorder pb-3">
-              <h3 className="text-xs font-semibold text-primaryText uppercase font-mono tracking-wider">Unresolved Exceptions</h3>
-              <Link href="/exceptions" className="text-xs text-secondaryText hover:text-primaryText flex items-center space-x-1">
-                <span>View All</span>
-                <ArrowUpRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            {exceptions.length === 0 ? (
-              <div className="py-8 text-center text-xs text-secondaryText font-mono">
-                No active exceptions requiring review.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {exceptions.slice(0, 5).map((exc) => (
-                  <Link
-                    key={exc.id}
-                    href={`/exceptions/${exc.id}`}
-                    className="block p-2.5 rounded bg-background/50 border border-surfaceBorder hover:border-neutral-700 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs text-primaryText font-medium">
-                        {exc.exception_type}
-                      </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-warning/10 text-warning border border-warning/20">
-                        {exc.severity}
-                      </span>
+                        </motion.div>
+                      ))}
                     </div>
-                    <p className="text-[11px] text-secondaryText mt-1 line-clamp-1">
-                      {exc.ai_analysis?.summary || "Requires human finance controller review."}
-                    </p>
-                  </Link>
-                ))}
-              </div>
-            )}
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Active Exceptions */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <Card className="h-full">
+                <CardHeader className="flex flex-row items-center justify-between pb-3">
+                  <CardTitle>Active Exceptions</CardTitle>
+                  {exceptions.length > 0 && (
+                    <Link
+                      href="/exceptions"
+                      className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                    >
+                      View all
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  {exceptions.length === 0 ? (
+                    <EmptyState
+                      icon={<CheckCircle2 className="h-5 w-5" />}
+                      title="All clear"
+                      description="No active exceptions requiring attention."
+                    />
+                  ) : (
+                    <div className="space-y-2">
+                      {exceptions.slice(0, 6).map((exc) => (
+                        <Link
+                          key={exc.id}
+                          href={`/exceptions/${exc.id}`}
+                          className="block p-3 rounded-lg border border-border hover:bg-accent/50 transition-all"
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-medium font-mono">
+                              {exc.exception_type.replace(/_/g, " ")}
+                            </span>
+                            <Badge
+                              variant={
+                                exc.severity === "HIGH" ||
+                                exc.severity === "CRITICAL"
+                                  ? "destructive"
+                                  : exc.severity === "MEDIUM"
+                                  ? "warning"
+                                  : "success"
+                              }
+                            >
+                              {exc.severity}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground line-clamp-1">
+                            {exc.ai_analysis?.summary ||
+                              "Requires review"}
+                          </p>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
           </div>
+
+          {/* Pipeline Status */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+          >
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle>Reconciliation Pipeline</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                  {[
+                    {
+                      label: "Ingest",
+                      icon: Layers,
+                      active: stats.totalProcessed > 0,
+                    },
+                    {
+                      label: "Validate",
+                      icon: ShieldCheck,
+                      active: stats.totalProcessed > 0,
+                    },
+                    {
+                      label: "Exact Match",
+                      icon: CheckCircle2,
+                      active: stats.totalMatched > 0,
+                    },
+                    {
+                      label: "AI Investigation",
+                      icon: Cpu,
+                      active: stats.totalExceptions > 0,
+                    },
+                    {
+                      label: "Resolution",
+                      icon: TrendingUp,
+                      active: stats.totalAutoResolved > 0,
+                    },
+                  ].map((step, i) => {
+                    const Icon = step.icon;
+                    return (
+                      <div key={step.label} className="flex items-center">
+                        <div
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
+                            step.active
+                              ? "bg-emerald-500/10 text-emerald-400"
+                              : "bg-secondary text-muted-foreground"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          <span>{step.label}</span>
+                        </div>
+                        {i < 4 && (
+                          <div
+                            className={`w-6 h-px mx-0.5 ${
+                              step.active ? "bg-emerald-500/40" : "bg-border"
+                            }`}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
         </div>
       </main>
     </div>

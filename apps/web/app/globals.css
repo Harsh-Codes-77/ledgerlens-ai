@@ -2,27 +2,89 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #09090b;
-  --foreground: #f4f4f5;
+@layer base {
+  :root {
+    --background: 240 6% 3%;
+    --foreground: 240 6% 97%;
+    --card: 240 5% 6%;
+    --card-foreground: 240 6% 97%;
+    --popover: 240 5% 6%;
+    --popover-foreground: 240 6% 97%;
+    --primary: 240 5% 96%;
+    --primary-foreground: 240 6% 3%;
+    --secondary: 240 4% 10%;
+    --secondary-foreground: 240 6% 90%;
+    --muted: 240 4% 10%;
+    --muted-foreground: 240 5% 55%;
+    --accent: 240 4% 12%;
+    --accent-foreground: 240 6% 90%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 160 84% 39%;
+    --success-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 98%;
+    --intelligence: 160 84% 39%;
+    --intelligence-foreground: 0 0% 98%;
+    --border: 240 4% 14%;
+    --input: 240 4% 14%;
+    --ring: 240 4% 30%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
-body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
-/* Scrollbar styling */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #09090b;
+  background: hsl(240 6% 3%);
 }
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: hsl(240 4% 18%);
   border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(240 4% 28%);
+}
+
+/* Selection */
+::selection {
+  background: hsl(160 84% 39% / 0.3);
+  color: hsl(var(--foreground));
+}
+
+/* Focus visible */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Number animations */
+@property --num {
+  syntax: "<integer>";
+  initial-value: 0;
+  inherits: false;
 }

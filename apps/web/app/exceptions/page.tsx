@@ -1,16 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Header from "@/components/Header";
-import { fetchApi, ExceptionCase } from "@/lib/api";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import TopBar from "@/components/Header";
+import { fetchApi, ExceptionCase } from "@/lib/api";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ConfidenceRing } from "@/components/ui/confidence-ring";
+import { LoadingState, EmptyState } from "@/components/ui/states";
 import { AlertTriangle, Filter, ArrowRight } from "lucide-react";
 
 export default function ExceptionsPage() {
   const [exceptions, setExceptions] = useState<ExceptionCase[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("");
-  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [sortBy, setSortBy] = useState<"severity" | "confidence" | "date">("severity");
 
   useEffect(() => {
     loadExceptions();
@@ -22,7 +28,6 @@ export default function ExceptionsPage() {
       let query = "/api/exceptions?";
       if (statusFilter) query += `status=${statusFilter}&`;
       if (typeFilter) query += `exception_type=${typeFilter}&`;
-
       const data = await fetchApi<ExceptionCase[]>(query);
       setExceptions(data);
     } catch (e) {
@@ -32,103 +37,193 @@ export default function ExceptionsPage() {
     }
   }
 
+  const sorted = useMemo(() => {
+    const copy = [...exceptions];
+    if (sortBy === "confidence") {
+      copy.sort((a, b) => a.confidence_score - b.confidence_score);
+    } else if (sortBy === "date") {
+      copy.sort(
+        (a, b) =>
+          new Date(b.created_at || 0).getTime() -
+          new Date(a.created_at || 0).getTime()
+      );
+    } else {
+      const order: Record<string, number> = {
+        CRITICAL: 0,
+        HIGH: 1,
+        MEDIUM: 2,
+        LOW: 3,
+      };
+      copy.sort(
+        (a, b) => (order[a.severity] ?? 4) - (order[b.severity] ?? 4)
+      );
+    }
+    return copy;
+  }, [exceptions, sortBy]);
+
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <Header title="Exceptions Investigation Queue" />
+      <TopBar />
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-[1400px] mx-auto p-6 space-y-4">
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col md:flex-row md:items-center justify-between gap-3"
+          >
+            <div>
+              <h2 className="text-lg font-bold tracking-tight">
+                Exceptions Queue
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {sorted.length} cases requiring review
+              </p>
+            </div>
+          </motion.div>
 
-      <main className="p-6 space-y-6 max-w-7xl">
-        {/* Filter Controls */}
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-surface border border-surfaceBorder p-4 rounded font-mono text-xs">
-          <div className="flex items-center space-x-3">
-            <Filter className="w-4 h-4 text-secondaryText" />
-            <span className="text-primaryText font-semibold">Filter Queue:</span>
-
+          {/* Filters */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.05 }}
+            className="flex flex-wrap items-center gap-2"
+          >
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Filter className="h-3.5 w-3.5" />
+              <span>Filter:</span>
+            </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-background border border-surfaceBorder rounded px-2.5 py-1.5 text-xs text-primaryText focus:outline-none"
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="">All Statuses</option>
+              <option value="">All Status</option>
               <option value="PENDING_REVIEW">Pending Review</option>
               <option value="ESCALATED">Escalated</option>
+              <option value="AUTO_RESOLVED">Auto-Resolved</option>
               <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
-              <option value="AUTO_RESOLVED">Auto Resolved</option>
             </select>
-
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
-              className="bg-background border border-surfaceBorder rounded px-2.5 py-1.5 text-xs text-primaryText focus:outline-none"
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="">All Exception Types</option>
-              <option value="amount_mismatch">Amount Mismatch</option>
+              <option value="">All Types</option>
               <option value="missing_settlement">Missing Settlement</option>
+              <option value="amount_mismatch">Amount Mismatch</option>
+              <option value="date_mismatch">Date Mismatch</option>
               <option value="duplicate_reference">Duplicate Reference</option>
-              <option value="ambiguous_match">Ambiguous Match</option>
               <option value="invalid_data">Invalid Data</option>
+              <option value="ambiguous_match">Ambiguous Match</option>
               <option value="partial_refund">Partial Refund</option>
             </select>
-          </div>
+            <div className="h-4 w-px bg-border" />
+            <span className="text-[11px] text-muted-foreground">Sort:</span>
+            {(["severity", "confidence", "date"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSortBy(s)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  sortBy === s
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s === "date" ? "Newest" : s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </motion.div>
 
-          <div className="text-secondaryText">
-            Showing <span className="text-primaryText font-bold">{exceptions.length}</span> exceptions
-          </div>
-        </div>
-
-        {/* Exceptions Data Table */}
-        <div className="bg-surface border border-surfaceBorder rounded p-4 space-y-3">
+          {/* Exception Cards */}
           {loading ? (
-            <div className="py-8 text-center text-xs font-mono text-secondaryText">Loading exceptions...</div>
-          ) : exceptions.length === 0 ? (
-            <div className="py-8 text-center text-xs font-mono text-secondaryText">No exceptions found for selected filters.</div>
+            <LoadingState message="Loading exceptions..." />
+          ) : sorted.length === 0 ? (
+            <EmptyState
+              icon={<AlertTriangle className="h-5 w-5" />}
+              title="Everything reconciled"
+              description="Nothing needs your attention. All records have been matched or resolved."
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono">
-                <thead>
-                  <tr className="border-b border-surfaceBorder text-secondaryText">
-                    <th className="pb-2 font-normal">Exception Type</th>
-                    <th className="pb-2 font-normal">Severity</th>
-                    <th className="pb-2 font-normal">Status</th>
-                    <th className="pb-2 font-normal">AI Confidence</th>
-                    <th className="pb-2 font-normal">Recommended Action</th>
-                    <th className="pb-2 font-normal">Summary</th>
-                    <th className="pb-2 font-normal text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-surfaceBorder/50">
-                  {exceptions.map((exc) => (
-                    <tr key={exc.id} className="hover:bg-background/40">
-                      <td className="py-3 font-semibold text-primaryText">{exc.exception_type}</td>
-                      <td className="py-3">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                          exc.severity === "HIGH" || exc.severity === "CRITICAL"
-                            ? "bg-critical/10 text-critical border border-critical/20"
-                            : "bg-warning/10 text-warning border border-warning/20"
-                        }`}>
-                          {exc.severity}
-                        </span>
-                      </td>
-                      <td className="py-3 text-secondaryText">{exc.status}</td>
-                      <td className="py-3 font-bold text-primaryText">{(exc.confidence_score * 100).toFixed(0)}%</td>
-                      <td className="py-3 text-primaryText uppercase text-[11px]">{exc.recommended_action || "ESCALATE"}</td>
-                      <td className="py-3 text-secondaryText text-[11px] max-w-sm truncate">
-                        {exc.ai_analysis?.summary || "Pending investigation"}
-                      </td>
-                      <td className="py-3 text-right">
-                        <Link
-                          href={`/exceptions/${exc.id}`}
-                          className="inline-flex items-center space-x-1 px-2.5 py-1 rounded bg-background border border-surfaceBorder hover:border-neutral-500 text-xs text-primaryText transition-colors"
-                        >
-                          <span>Investigate</span>
-                          <ArrowRight className="w-3 h-3" />
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <motion.div
+              initial="hidden"
+              animate="show"
+              variants={{
+                hidden: {},
+                show: { transition: { staggerChildren: 0.04 } },
+              }}
+              className="space-y-2"
+            >
+              {sorted.map((exc) => (
+                <motion.div
+                  key={exc.id}
+                  variants={{
+                    hidden: { opacity: 0, y: 8 },
+                    show: { opacity: 1, y: 0 },
+                  }}
+                >
+                  <Link
+                    href={`/exceptions/${exc.id}`}
+                    className="block group"
+                  >
+                    <Card className="hover:bg-accent/30 transition-all cursor-pointer">
+                      <CardContent className="p-4">
+                        <div className="flex items-center gap-4">
+                          <ConfidenceRing
+                            score={exc.confidence_score}
+                            size="md"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge
+                                variant={
+                                  exc.severity === "HIGH" ||
+                                  exc.severity === "CRITICAL"
+                                    ? "destructive"
+                                    : exc.severity === "MEDIUM"
+                                    ? "warning"
+                                    : "success"
+                                }
+                              >
+                                {exc.severity}
+                              </Badge>
+                              <span className="text-xs font-medium font-mono">
+                                {exc.exception_type.replace(/_/g, " ")}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground line-clamp-1">
+                              {exc.ai_analysis?.summary ||
+                                "Awaiting investigation"}
+                            </p>
+                            {exc.transaction_details && (
+                              <p className="text-[11px] text-muted-foreground font-mono mt-1">
+                                {exc.transaction_details.external_transaction_id}{" "}
+                                · ₹
+                                {exc.transaction_details.amount.toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <Badge
+                              variant={
+                                exc.status === "AUTO_RESOLVED"
+                                  ? "success"
+                                  : exc.status === "ESCALATED"
+                                  ? "destructive"
+                                  : "secondary"
+                              }
+                            >
+                              {exc.status.replace(/_/g, " ")}
+                            </Badge>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                </motion.div>
+              ))}
+            </motion.div>
           )}
         </div>
       </main>

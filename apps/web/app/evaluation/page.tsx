@@ -1,9 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Header from "@/components/Header";
+import { motion } from "framer-motion";
+import TopBar from "@/components/Header";
 import { fetchApi, Batch, EvaluationData } from "@/lib/api";
-import { BarChart3, AlertOctagon, CheckCircle2, ShieldAlert } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MetricCard } from "@/components/ui/metric-card";
+import { LoadingState, EmptyState } from "@/components/ui/states";
+import {
+  BarChart3,
+  AlertOctagon,
+  CheckCircle2,
+  ShieldAlert,
+  TrendingUp,
+} from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from "recharts";
+
+const PIE_COLORS = ["#10b981", "#f59e0b", "#0ea5e9", "#ef4444", "#8b5cf6"];
 
 export default function EvaluationPage() {
   const [evalData, setEvalData] = useState<EvaluationData | null>(null);
@@ -18,8 +41,9 @@ export default function EvaluationPage() {
       setLoading(true);
       const batches = await fetchApi<Batch[]>("/api/batches");
       if (batches.length > 0) {
-        const latestBatch = batches[0];
-        const data = await fetchApi<EvaluationData>(`/api/evaluation/${latestBatch.id}`);
+        const data = await fetchApi<EvaluationData>(
+          `/api/evaluation/${batches[0].id}`
+        );
         setEvalData(data);
       }
     } catch (e) {
@@ -29,120 +53,264 @@ export default function EvaluationPage() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="flex-1 flex flex-col min-w-0">
+        <TopBar />
+        <LoadingState message="Loading analytics..." />
+      </div>
+    );
+  }
+
+  if (!evalData) {
+    return (
+      <div className="flex-1 flex flex-col min-w-0">
+        <TopBar />
+        <EmptyState
+          icon={<BarChart3 className="h-5 w-5" />}
+          title="No evaluation data"
+          description="Run a reconciliation batch first to generate analytics."
+        />
+      </div>
+    );
+  }
+
+  const accuracyRate =
+    evalData.total_records > 0
+      ? ((evalData.correct_matches / evalData.total_records) * 100).toFixed(1)
+      : "0.0";
+
+  const matchTypeData = [
+    { name: "Exact", value: evalData.match_type_accuracy?.EXACT ?? 0 },
+    {
+      name: "Tolerance",
+      value: evalData.match_type_accuracy?.TOLERANCE ?? 0,
+    },
+    { name: "Ambiguous", value: evalData.match_type_accuracy?.AMBIGUOUS ?? 0 },
+    { name: "Unmatched", value: evalData.match_type_accuracy?.UNMATCHED ?? 0 },
+  ].filter((d) => d.value > 0);
+
+  const resolutionData = evalData.resolution_distribution
+    ? Object.entries(evalData.resolution_distribution).map(([key, val]) => ({
+        name: key.replace(/_/g, " "),
+        value: val as number,
+      }))
+    : [];
+
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <Header title="Engineering Quality & Evaluation Benchmarks" />
+      <TopBar />
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-[1400px] mx-auto p-6 space-y-6">
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <h2 className="text-lg font-bold tracking-tight">
+              Analytics & Insights
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Evaluation metrics from your latest reconciliation run
+            </p>
+          </motion.div>
 
-      <main className="p-6 space-y-6 max-w-7xl">
-        {/* Metric Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 font-mono">
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-[11px] text-secondaryText uppercase">Evaluation Dataset Size</div>
-            <div className="text-2xl font-bold text-primaryText mt-2">{evalData?.total_records || 500} Records</div>
-            <div className="text-[10px] text-secondaryText mt-1">Ground-truth annotated batch</div>
+          {/* Metrics */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="grid grid-cols-2 lg:grid-cols-4 gap-3"
+          >
+            <MetricCard
+              label="Dataset Size"
+              value={evalData.total_records.toLocaleString()}
+              subtitle="Ground-truth records"
+              icon={<BarChart3 className="h-4 w-4" />}
+            />
+            <MetricCard
+              label="Accuracy Rate"
+              value={`${accuracyRate}%`}
+              subtitle="Correct matches"
+              icon={<CheckCircle2 className="h-4 w-4" />}
+            />
+            <MetricCard
+              label="False Positives"
+              value={evalData.false_positives}
+              subtitle="Incorrect auto-resolves"
+              icon={<ShieldAlert className="h-4 w-4" />}
+            />
+            <MetricCard
+              label="Escalation Precision"
+              value={`${evalData.escalation_precision ?? 0}%`}
+              subtitle="Correct human escalations"
+              icon={<TrendingUp className="h-4 w-4" />}
+            />
+          </motion.div>
+
+          {/* Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {matchTypeData.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+              >
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle>Match Type Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <PieChart>
+                        <Pie
+                          data={matchTypeData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={80}
+                          dataKey="value"
+                          stroke="none"
+                        >
+                          {matchTypeData.map((_, i) => (
+                            <Cell
+                              key={i}
+                              fill={PIE_COLORS[i % PIE_COLORS.length]}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(240 5% 6%)",
+                            border: "1px solid hsl(240 4% 14%)",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex flex-wrap gap-3 justify-center mt-2">
+                      {matchTypeData.map((d, i) => (
+                        <div key={d.name} className="flex items-center gap-1.5">
+                          <div
+                            className="h-2 w-2 rounded-full"
+                            style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                          />
+                          <span className="text-[11px] text-muted-foreground">
+                            {d.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
+
+            {resolutionData.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle>Resolution Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={resolutionData}>
+                        <XAxis
+                          dataKey="name"
+                          tick={{ fontSize: 10, fill: "hsl(240 5% 55%)" }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10, fill: "hsl(240 5% 55%)" }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(240 5% 6%)",
+                            border: "1px solid hsl(240 4% 14%)",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                          }}
+                        />
+                        <Bar
+                          dataKey="value"
+                          radius={[4, 4, 0, 0]}
+                          fill="#10b981"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            )}
           </div>
 
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-[11px] text-secondaryText uppercase">Match Accuracy</div>
-            <div className="text-2xl font-bold text-positive mt-2">
-              {evalData ? `${(evalData.accuracy * 100).toFixed(1)}%` : "100.0%"}
-            </div>
-            <div className="text-[10px] text-secondaryText mt-1">Deterministic + AI Pipeline</div>
-          </div>
-
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-[11px] text-secondaryText uppercase">Auto-Resolution Rate</div>
-            <div className="text-2xl font-bold text-primaryText mt-2">
-              {evalData ? `${(evalData.auto_resolution_rate * 100).toFixed(1)}%` : "69.8%"}
-            </div>
-            <div className="text-[10px] text-secondaryText mt-1">High confidence safe cases</div>
-          </div>
-
-          <div className="bg-surface border border-surfaceBorder p-4 rounded">
-            <div className="text-[11px] text-secondaryText uppercase">Escalation Rate</div>
-            <div className="text-2xl font-bold text-warning mt-2">
-              {evalData ? `${(evalData.escalation_rate * 100).toFixed(1)}%` : "30.2%"}
-            </div>
-            <div className="text-[10px] text-secondaryText mt-1">Uncertain cases sent for human review</div>
-          </div>
-        </div>
-
-        {/* Detailed Precision / Recall / F1 Table */}
-        <div className="bg-surface border border-surfaceBorder rounded p-4 space-y-3 font-mono">
-          <div className="flex items-center space-x-2 text-primaryText font-semibold border-b border-surfaceBorder pb-2">
-            <BarChart3 className="w-4 h-4 text-positive" />
-            <span className="text-xs uppercase">Quantitative Performance Metrics</span>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-            <div className="p-3 bg-background/50 border border-surfaceBorder rounded">
-              <span className="text-secondaryText text-[10px] uppercase">Precision</span>
-              <div className="text-lg font-bold text-primaryText mt-1">100.0%</div>
-            </div>
-            <div className="p-3 bg-background/50 border border-surfaceBorder rounded">
-              <span className="text-secondaryText text-[10px] uppercase">Recall</span>
-              <div className="text-lg font-bold text-primaryText mt-1">100.0%</div>
-            </div>
-            <div className="p-3 bg-background/50 border border-surfaceBorder rounded">
-              <span className="text-secondaryText text-[10px] uppercase">F1 Score</span>
-              <div className="text-lg font-bold text-primaryText mt-1">1.000</div>
-            </div>
-            <div className="p-3 bg-background/50 border border-surfaceBorder rounded">
-              <span className="text-secondaryText text-[10px] uppercase">Avg Batch Processing Time</span>
-              <div className="text-lg font-bold text-primaryText mt-1">{evalData?.processing_time_seconds || 0.01}s</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Mandatory Known Failure Analysis Table */}
-        <div className="bg-surface border border-surfaceBorder rounded p-4 space-y-3">
-          <div className="flex items-center space-x-2 text-primaryText font-semibold border-b border-surfaceBorder pb-2 font-mono">
-            <AlertOctagon className="w-4 h-4 text-warning" />
-            <span className="text-xs uppercase">Known Failure & Escalation Analysis</span>
-          </div>
-
-          <p className="text-xs text-secondaryText font-mono">
-            LedgerLens AI strictly avoids guessing. The table below lists complex scenarios where the system intentionally escalates to human review instead of making risky automatic decisions.
-          </p>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono">
-              <thead>
-                <tr className="border-b border-surfaceBorder text-secondaryText">
-                  <th className="pb-2 font-normal">Scenario Case</th>
-                  <th className="pb-2 font-normal">Expected Behavior</th>
-                  <th className="pb-2 font-normal">Actual System Action</th>
-                  <th className="pb-2 font-normal">Safety Rationale</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surfaceBorder/50">
-                <tr>
-                  <td className="py-3 font-semibold text-primaryText">Duplicate Bank Callbacks</td>
-                  <td className="py-3 text-secondaryText">Escalate for Review</td>
-                  <td className="py-3 text-warning font-semibold">ESCALATE_TO_HUMAN</td>
-                  <td className="py-3 text-secondaryText text-[11px]">Multiple matches detected with matching amounts & references.</td>
-                </tr>
-                <tr>
-                  <td className="py-3 font-semibold text-primaryText">Corrupted / Negative Amounts</td>
-                  <td className="py-3 text-secondaryText">Flag Invalid & Escalate</td>
-                  <td className="py-3 text-critical font-semibold">INVALID_DATA_EXCEPTION</td>
-                  <td className="py-3 text-secondaryText text-[11px]">Stage 1 Validation rejected corrupted currency format.</td>
-                </tr>
-                <tr>
-                  <td className="py-3 font-semibold text-primaryText">Missing Bank Settlement</td>
-                  <td className="py-3 text-secondaryText">AI Investigation + Escalate</td>
-                  <td className="py-3 text-warning font-semibold">ESCALATE_TO_HUMAN</td>
-                  <td className="py-3 text-secondaryText text-[11px]">No settlement reference found in bank feed. AI generated cause summary.</td>
-                </tr>
-                <tr>
-                  <td className="py-3 font-semibold text-primaryText">AI Timeout / Provider Down</td>
-                  <td className="py-3 text-secondaryText">Fallback without Crash</td>
-                  <td className="py-3 text-primaryText font-semibold">HUMAN_REVIEW_FALLBACK</td>
-                  <td className="py-3 text-secondaryText text-[11px]">System handles provider outages gracefully with zero batch crashes.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {/* Known Failures */}
+          {evalData.known_failures && evalData.known_failures.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+            >
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertOctagon className="h-4 w-4 text-red-400" />
+                    Known Failure Cases ({evalData.known_failures.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
+                            Type
+                          </th>
+                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
+                            Description
+                          </th>
+                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
+                            Expected
+                          </th>
+                          <th className="text-left py-2 px-3 font-medium text-muted-foreground">
+                            Got
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {evalData.known_failures.map((f, i) => (
+                          <tr
+                            key={i}
+                            className="border-b border-border/50"
+                          >
+                            <td className="py-2 px-3 font-medium font-mono">
+                              {f.type}
+                            </td>
+                            <td className="py-2 px-3 text-muted-foreground">
+                              {f.description}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-emerald-400">
+                              {f.expected}
+                            </td>
+                            <td className="py-2 px-3 font-mono text-red-400">
+                              {f.got}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          )}
         </div>
       </main>
     </div>

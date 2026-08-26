@@ -438,6 +438,58 @@ def list_transactions(batch_id: Optional[str] = None, db: Session = Depends(get_
         q = q.filter(Transaction.batch_id == batch_id)
     return q.limit(200).all()
 
+@router.get("/transactions/{transaction_id}")
+def get_transaction_detail(transaction_id: str, db: Session = Depends(get_db)):
+    txn = db.query(Transaction).filter(Transaction.id == transaction_id).first()
+    if not txn:
+        txn = db.query(Transaction).filter(Transaction.external_transaction_id == transaction_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    settlement = None
+    if txn.payment_reference:
+        settlement = db.query(Settlement).filter(Settlement.reference == txn.payment_reference).first()
+    if not settlement and txn.batch_id:
+        settlement = db.query(Settlement).filter(
+            Settlement.batch_id == txn.batch_id,
+            Settlement.source == txn.source
+        ).first()
+
+    rec_result = None
+    if txn.batch_id:
+        rec_result = db.query(ReconciliationResult).filter(
+            ReconciliationResult.batch_id == txn.batch_id,
+            ReconciliationResult.source_record_id == txn.external_transaction_id
+        ).first()
+
+    exception = None
+    if rec_result:
+        exception = db.query(ExceptionCase).filter(
+            ExceptionCase.reconciliation_result_id == rec_result.id
+        ).first()
+
+    refund = None
+    if txn.payment_reference:
+        refund = db.query(Refund).filter(Refund.transaction_reference == txn.payment_reference).first()
+
+    audit_logs = db.query(AuditLog).filter(
+        AuditLog.entity_id == txn.id
+    ).order_by(AuditLog.created_at.desc()).all()
+
+    if not audit_logs and rec_result:
+        audit_logs = db.query(AuditLog).filter(
+            AuditLog.entity_id == rec_result.id
+        ).order_by(AuditLog.created_at.desc()).all()
+
+    return {
+        "transaction": TransactionSchema.model_validate(txn).model_dump(),
+        "settlement": SettlementSchema.model_validate(settlement).model_dump() if settlement else None,
+        "reconciliation_result": ReconciliationResultSchema.model_validate(rec_result).model_dump() if rec_result else None,
+        "exception": ExceptionCaseSchema.model_validate(exception).model_dump() if exception else None,
+        "refund": RefundSchema.model_validate(refund).model_dump() if refund else None,
+        "audit_logs": [AuditLogSchema.model_validate(a).model_dump() for a in audit_logs],
+    }
+
 @router.get("/settlements", response_model=List[SettlementSchema])
 def list_settlements(batch_id: Optional[str] = None, db: Session = Depends(get_db)):
     q = db.query(Settlement)

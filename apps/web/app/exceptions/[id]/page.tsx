@@ -2,44 +2,49 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Header from "@/components/Header";
-import { fetchApi, ExceptionCase } from "@/lib/api";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import TopBar from "@/components/Header";
+import { fetchApi, ExceptionCase } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ConfidenceRing } from "@/components/ui/confidence-ring";
+import { LoadingState } from "@/components/ui/states";
 import {
   ArrowLeft,
   CheckCircle2,
-  AlertTriangle,
   XCircle,
+  AlertTriangle,
   Cpu,
-  Search,
   Clock,
   ShieldAlert,
   FileText,
-  HelpCircle,
-  Check,
-  ChevronRight
+  Shield,
 } from "lucide-react";
 
 export default function ExceptionDetailPage() {
   const params = useParams();
   const exceptionId = params.id as string;
-
   const [exc, setExc] = useState<ExceptionCase | null>(null);
   const [loading, setLoading] = useState(true);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<"approve" | "reject" | "escalate">("escalate");
+  const [selectedAction, setSelectedAction] = useState<
+    "approve" | "reject" | "escalate"
+  >("escalate");
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    if (exceptionId) {
-      loadException();
-    }
+    if (exceptionId) loadException();
   }, [exceptionId]);
 
   async function loadException() {
     try {
       setLoading(true);
-      const data = await fetchApi<ExceptionCase>(`/api/exceptions/${exceptionId}`);
+      const data = await fetchApi<ExceptionCase>(
+        `/api/exceptions/${exceptionId}`
+      );
       setExc(data);
       if (data.recommended_action === "auto_resolve") {
         setSelectedAction("approve");
@@ -56,17 +61,26 @@ export default function ExceptionDetailPage() {
   async function handleAction(actionType: "approve" | "reject" | "escalate") {
     try {
       setSubmitting(true);
-      await fetchApi<ExceptionCase>(`/api/exceptions/${exceptionId}/${actionType}`, {
-        method: "POST",
-        body: JSON.stringify({
-          action: actionType,
-          notes: notes.trim() || undefined,
-          actor_id: "human_controller_01",
-        }),
-      });
+      await fetchApi<ExceptionCase>(
+        `/api/exceptions/${exceptionId}/${actionType}`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            action: actionType,
+            notes: notes || undefined,
+          }),
+        }
+      );
+      setActionSuccess(
+        actionType === "approve"
+          ? "Case approved and resolved."
+          : actionType === "reject"
+          ? "Case rejected."
+          : "Case escalated for senior review."
+      );
       await loadException();
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      console.error(e);
     } finally {
       setSubmitting(false);
     }
@@ -75,345 +89,403 @@ export default function ExceptionDetailPage() {
   if (loading || !exc) {
     return (
       <div className="flex-1 flex flex-col min-w-0">
-        <Header title="Exception Investigation Workspace" />
-        <div className="p-6 font-mono text-xs text-secondaryText">Loading investigation terminal...</div>
+        <TopBar title="Investigation" />
+        <LoadingState message="Loading investigation details..." />
       </div>
     );
   }
 
-  const ai = exc.ai_analysis;
-  const txn = exc.transaction_details;
-  const search = exc.settlement_search;
-  const timeline = exc.timeline || [];
-
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <Header title={`Investigation Terminal — Case #${exc.id.substring(0, 8)}`} />
-
-      <main className="p-6 space-y-6 max-w-7xl">
-        {/* Navigation & Header Status */}
-        <div className="flex items-center justify-between">
-          <Link href="/exceptions" className="inline-flex items-center space-x-2 text-xs font-mono text-secondaryText hover:text-primaryText">
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to Review Queue</span>
+      <TopBar title="Investigation" />
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-[1400px] mx-auto p-6 space-y-4">
+          <Link
+            href="/exceptions"
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to Queue
           </Link>
 
-          <div className="flex items-center space-x-2 font-mono text-xs">
-            <span className="text-secondaryText">Case Severity:</span>
-            <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-              exc.severity === "HIGH" || exc.severity === "CRITICAL"
-                ? "bg-critical/10 text-critical border border-critical/30"
-                : "bg-warning/10 text-warning border border-warning/30"
-            }`}>
-              {exc.severity}
-            </span>
-            <span className="text-secondaryText border-l border-surfaceBorder pl-3">Status:</span>
-            <span className="font-bold text-primaryText uppercase">{exc.status}</span>
-          </div>
-        </div>
-
-        {/* Closed-Loop Ideal Flow Visual Pipeline */}
-        <div className="bg-surface border border-surfaceBorder p-3 rounded font-mono text-xs">
-          <div className="text-[10px] text-secondaryText uppercase tracking-wider mb-2">Investigation Process Pipeline</div>
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-            <span className="px-2.5 py-1 rounded bg-background border border-surfaceBorder text-secondaryText">
-              1. Exception Detected
-            </span>
-            <ChevronRight className="w-3 h-3 text-secondaryText" />
-            <span className="px-2.5 py-1 rounded bg-background border border-surfaceBorder text-secondaryText">
-              2. Deterministic Rules Checked
-            </span>
-            <ChevronRight className="w-3 h-3 text-secondaryText" />
-            <span className="px-2.5 py-1 rounded bg-background border border-surfaceBorder text-secondaryText">
-              3. AI Analyzed Evidence
-            </span>
-            <ChevronRight className="w-3 h-3 text-secondaryText" />
-            <span className="px-2.5 py-1 rounded bg-positive/10 border border-positive/30 text-positive font-semibold">
-              4. Finance Controller Evidence Review
-            </span>
-            <ChevronRight className="w-3 h-3 text-secondaryText" />
-            <span className="px-2.5 py-1 rounded bg-background border border-surfaceBorder text-secondaryText">
-              5. Decision & Audit Log
-            </span>
-          </div>
-        </div>
-
-        {/* Top Operational Metrics Banner */}
-        <div className="bg-surface border border-surfaceBorder p-4 rounded grid grid-cols-1 md:grid-cols-4 gap-4 font-mono">
-          <div>
-            <span className="text-[10px] text-secondaryText uppercase">Exception Type</span>
-            <div className="text-sm font-bold text-primaryText uppercase mt-0.5">{exc.exception_type}</div>
-          </div>
-          <div>
-            <span className="text-[10px] text-secondaryText uppercase">AI Confidence Score</span>
-            <div className="text-sm font-bold text-primaryText mt-0.5">{(exc.confidence_score * 100).toFixed(0)}%</div>
-          </div>
-          <div>
-            <span className="text-[10px] text-secondaryText uppercase">AI Recommendation</span>
-            <div className="text-sm font-bold text-primaryText uppercase mt-0.5">{exc.recommended_action || "ESCALATE"}</div>
-          </div>
-          <div>
-            <span className="text-[10px] text-secondaryText uppercase">Human Review Needed</span>
-            <div className="text-sm font-bold text-warning mt-0.5">YES (Mandatory)</div>
-          </div>
-        </div>
-
-        {/* 4 Essential Evidence Sections Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 font-mono text-xs">
-          
-          {/* Section 1: Transaction Details */}
-          <div className="bg-surface border border-surfaceBorder p-4 rounded space-y-3">
-            <div className="flex items-center space-x-2 text-primaryText font-semibold border-b border-surfaceBorder pb-2">
-              <FileText className="w-4 h-4 text-blue-400" />
-              <span>Transaction Details</span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Transaction ID:</span>
-                <span className="text-primaryText font-bold">{txn?.external_transaction_id || "TXN_0500"}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Amount:</span>
-                <span className="text-primaryText font-bold">₹{txn?.amount ? txn.amount.toLocaleString() : "10,000"}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Currency:</span>
-                <span className="text-primaryText">{txn?.currency || "INR"}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Status:</span>
-                <span className="text-positive font-semibold">{txn?.status || "Captured"}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Transaction Date:</span>
-                <span className="text-primaryText">{txn?.transaction_date || "2026-01-06 15:18"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-secondaryText">Reference ID:</span>
-                <span className="text-primaryText font-mono">{txn?.payment_reference || "PAY_XXXX"}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 2: Settlement Search */}
-          <div className="bg-surface border border-surfaceBorder p-4 rounded space-y-3">
-            <div className="flex items-center space-x-2 text-primaryText font-semibold border-b border-surfaceBorder pb-2">
-              <Search className="w-4 h-4 text-warning" />
-              <span>Settlement Search</span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Records Checked:</span>
-                <span className="text-primaryText font-bold">{search?.records_checked || 500}</span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Matching Reference:</span>
-                <span className={`font-semibold ${search?.matching_reference === "None" ? "text-critical" : "text-positive"}`}>
-                  {search?.matching_reference || "None"}
-                </span>
-              </div>
-              <div className="flex justify-between border-b border-surfaceBorder/40 pb-1.5">
-                <span className="text-secondaryText">Closest Amount Match:</span>
-                <span className="text-primaryText font-bold">{search?.closest_amount_match || "SET_123"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-secondaryText">Closest Date Variance:</span>
-                <span className="text-warning">{search?.closest_date_diff || "+2 days"}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Timeline */}
-          <div className="bg-surface border border-surfaceBorder p-4 rounded space-y-3">
-            <div className="flex items-center space-x-2 text-primaryText font-semibold border-b border-surfaceBorder pb-2">
-              <Clock className="w-4 h-4 text-positive" />
-              <span>Audit Timeline</span>
-            </div>
-
-            <div className="space-y-2">
-              {timeline.map((item, idx) => (
-                <div key={idx} className="flex items-start space-x-2 text-[11px]">
-                  <span className="text-secondaryText font-mono w-10 shrink-0">{item.time}</span>
-                  <span className="text-primaryText flex-1">{item.event}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* AI Investigation Grounded Report */}
-        <div className="bg-surface border border-surfaceBorder p-4 rounded space-y-3 font-mono text-xs">
-          <div className="flex items-center space-x-2 text-primaryText font-semibold border-b border-surfaceBorder pb-2">
-            <Cpu className="w-4 h-4 text-positive" />
-            <span>AI Grounded Exception Investigation</span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <span className="text-secondaryText text-[10px] uppercase">Grounded Summary</span>
-              <p className="text-primaryText mt-1 font-sans text-xs leading-relaxed">
-                {ai?.summary || "Summary unavailable."}
-              </p>
-            </div>
-            <div>
-              <span className="text-secondaryText text-[10px] uppercase">Extracted Evidence Bullet Points</span>
-              <ul className="mt-1 space-y-1 text-secondaryText">
-                {ai?.evidence?.map((e, idx) => (
-                  <li key={idx} className="flex items-start space-x-1.5">
-                    <span className="text-positive">•</span>
-                    <span>{e}</span>
-                  </li>
-                )) || <li>No evidence items recorded.</li>}
-              </ul>
-            </div>
-            <div>
-              <span className="text-secondaryText text-[10px] uppercase">Likely Root Cause</span>
-              <p className="text-secondaryText mt-1">{ai?.likely_cause || "Root cause under review."}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Decision Impact Preview & Operator Action Panel */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 font-mono text-xs">
-          
-          {/* Action Selector Buttons & Resolution Notes */}
-          <div className="bg-surface border border-surfaceBorder p-4 rounded space-y-4">
-            <h4 className="font-semibold text-primaryText uppercase text-xs border-b border-surfaceBorder pb-2">
-              Select Decision Action
-            </h4>
-
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedAction("approve")}
-                className={`py-2.5 px-3 rounded font-semibold text-xs transition-colors border text-center ${
-                  selectedAction === "approve"
-                    ? "bg-positive/20 border-positive text-positive"
-                    : "bg-background border-surfaceBorder text-secondaryText hover:text-primaryText"
-                }`}
-              >
-                APPROVE RESOLUTION
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedAction("reject")}
-                className={`py-2.5 px-3 rounded font-semibold text-xs transition-colors border text-center ${
-                  selectedAction === "reject"
-                    ? "bg-critical/20 border-critical text-critical"
-                    : "bg-background border-surfaceBorder text-secondaryText hover:text-primaryText"
-                }`}
-              >
-                REJECT RECOMMENDATION
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedAction("escalate")}
-                className={`py-2.5 px-3 rounded font-semibold text-xs transition-colors border text-center ${
-                  selectedAction === "escalate"
-                    ? "bg-warning/20 border-warning text-warning"
-                    : "bg-background border-surfaceBorder text-secondaryText hover:text-primaryText"
-                }`}
-              >
-                ESCALATE CASE
-              </button>
-            </div>
-
-            <div>
-              <label className="text-secondaryText text-[10px] uppercase block mb-1">
-                Resolution Notes / Operator Remarks
-              </label>
-              <textarea
-                rows={3}
-                placeholder="Enter mandatory resolution notes before submitting decision..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full bg-background border border-surfaceBorder rounded p-2.5 text-xs font-mono text-primaryText focus:outline-none focus:border-neutral-500"
-              />
-            </div>
-
-            <button
-              onClick={() => handleAction(selectedAction)}
-              disabled={submitting}
-              className="w-full bg-primaryText text-background py-2.5 rounded font-bold uppercase text-xs hover:bg-neutral-200 transition-colors disabled:opacity-50"
+          {/* Success Banner */}
+          {actionSuccess && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-400"
             >
-              {submitting ? "Executing Action..." : `Confirm & Submit Action: ${selectedAction.toUpperCase()}`}
-            </button>
-          </div>
+              <CheckCircle2 className="h-4 w-4" />
+              {actionSuccess}
+            </motion.div>
+          )}
 
-          {/* Decision Impact Box */}
-          <div className="bg-surface border border-surfaceBorder p-4 rounded space-y-3">
-            <h4 className="font-semibold text-primaryText uppercase text-xs border-b border-surfaceBorder pb-2">
-              Decision Impact & Audit Effects
-            </h4>
-
-            <div className="p-3 rounded bg-background border border-surfaceBorder space-y-2">
-              <div className="text-secondaryText text-[10px] uppercase">Selected Action Preview:</div>
-              <div className="text-sm font-bold text-primaryText uppercase">
-                Action: {selectedAction === "approve" ? "APPROVE RESOLUTION" : selectedAction === "reject" ? "REJECT RECOMMENDATION" : "ESCALATE"}
-              </div>
-
-              <div className="pt-2 border-t border-surfaceBorder space-y-1.5 text-xs">
-                {selectedAction === "approve" && (
-                  <>
-                    <div className="text-positive flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Case will be marked resolved in main ledger</span>
-                    </div>
-                    <div className="text-positive flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Immutable audit event will be created with operator ID</span>
-                    </div>
-                    <div className="text-positive flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>No automatic financial record modification without verification</span>
-                    </div>
-                  </>
-                )}
-
-                {selectedAction === "reject" && (
-                  <>
-                    <div className="text-critical flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Case marked rejected and returned for re-investigation</span>
-                    </div>
-                    <div className="text-critical flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Audit log records rejection and operator notes</span>
-                    </div>
-                  </>
-                )}
-
-                {selectedAction === "escalate" && (
-                  <>
-                    <div className="text-warning flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Case remains unresolved for senior controller review</span>
-                    </div>
-                    <div className="text-warning flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Added to priority escalation review queue</span>
-                    </div>
-                    <div className="text-warning flex items-center space-x-2">
-                      <Check className="w-4 h-4 shrink-0" />
-                      <span>Requires further manual bank statement investigation</span>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {exc.resolution_notes && (
-              <div className="pt-2">
-                <span className="text-[10px] text-secondaryText uppercase block mb-1">Previous Resolution History</span>
-                <div className="p-2 bg-background rounded border border-surfaceBorder text-xs text-primaryText">
-                  {exc.resolution_notes}
+          {/* Pipeline Progress */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center gap-1 overflow-x-auto pb-1"
+          >
+            {[
+              { label: "Exception Detected", active: true },
+              {
+                label: "AI Investigation",
+                active: !!exc.ai_analysis,
+              },
+              {
+                label:
+                  exc.status === "AUTO_RESOLVED"
+                    ? "Auto-Resolved"
+                    : exc.status === "ESCALATED"
+                    ? "Escalated"
+                    : "Awaiting Decision",
+                active: exc.status !== "PENDING_REVIEW",
+              },
+            ].map((step, i) => (
+              <div key={step.label} className="flex items-center">
+                <div
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap ${
+                    step.active
+                      ? "bg-emerald-500/10 text-emerald-400"
+                      : "bg-secondary text-muted-foreground"
+                  }`}
+                >
+                  {step.label}
                 </div>
+                {i < 2 && (
+                  <div
+                    className={`w-6 h-px mx-0.5 ${
+                      step.active ? "bg-emerald-500/40" : "bg-border"
+                    }`}
+                  />
+                )}
               </div>
-            )}
-          </div>
+            ))}
+          </motion.div>
 
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Left: Case Context */}
+            <motion.div
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.1 }}
+              className="space-y-4"
+            >
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+                    Case Context
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Exception Type
+                    </span>
+                    <span className="text-xs font-medium font-mono">
+                      {exc.exception_type.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Severity
+                    </span>
+                    <Badge
+                      variant={
+                        exc.severity === "HIGH" || exc.severity === "CRITICAL"
+                          ? "destructive"
+                          : exc.severity === "MEDIUM"
+                          ? "warning"
+                          : "success"
+                      }
+                    >
+                      {exc.severity}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      Status
+                    </span>
+                    <Badge
+                      variant={
+                        exc.status === "AUTO_RESOLVED"
+                          ? "success"
+                          : exc.status === "ESCALATED"
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {exc.status.replace(/_/g, " ")}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      AI Confidence
+                    </span>
+                    <ConfidenceRing score={exc.confidence_score} size="sm" />
+                  </div>
+                  <div className="h-px bg-border" />
+                  {exc.transaction_details && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                        Source Transaction
+                      </p>
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">ID</span>
+                          <span className="font-mono">
+                            {exc.transaction_details.external_transaction_id}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Amount</span>
+                          <span className="font-mono tabular-nums">
+                            ₹{exc.transaction_details.amount.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Source</span>
+                          <span>{exc.transaction_details.source}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Status</span>
+                          <span>{exc.transaction_details.status}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Center: Investigation Report */}
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+              className="lg:col-span-1 space-y-4"
+            >
+              {exc.ai_analysis ? (
+                <>
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-center gap-2">
+                        <Cpu className="h-4 w-4 text-emerald-400" />
+                        AI Investigation
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
+                          Summary
+                        </p>
+                        <p className="text-sm leading-relaxed">
+                          {exc.ai_analysis.summary}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
+                          Likely Cause
+                        </p>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {exc.ai_analysis.likely_cause}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
+                          Evidence
+                        </p>
+                        <div className="space-y-1.5">
+                          {exc.ai_analysis.evidence.map((e, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-2 text-xs"
+                            >
+                              <span className="text-emerald-400 mt-0.5">●</span>
+                              <span className="text-muted-foreground">{e}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium mb-1.5">
+                          Recommended Action
+                        </p>
+                        <Badge
+                          variant={
+                            exc.ai_analysis.recommended_action ===
+                            "auto_resolve"
+                              ? "success"
+                              : exc.ai_analysis.recommended_action ===
+                                "escalate"
+                              ? "destructive"
+                              : "warning"
+                          }
+                        >
+                          {exc.ai_analysis.recommended_action.replace(
+                            /_/g,
+                            " "
+                          )}
+                        </Badge>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="p-8 text-center">
+                    <Cpu className="h-6 w-6 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Investigation pending...
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Decision Timeline */}
+              {exc.decision_timeline && exc.decision_timeline.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                      Decision Timeline
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {exc.decision_timeline.map((event, i) => (
+                        <div key={i} className="flex gap-3 text-xs">
+                          <div className="flex flex-col items-center">
+                            <div
+                              className={`h-2 w-2 rounded-full mt-1.5 ${
+                                event.outcome?.includes("MATCH")
+                                  ? "bg-emerald-500"
+                                  : event.outcome?.includes("EXCEPTION")
+                                  ? "bg-amber-500"
+                                  : "bg-sky-500"
+                              }`}
+                            />
+                            {i < (exc.decision_timeline?.length || 0) - 1 && (
+                              <div className="w-px flex-1 bg-border my-1" />
+                            )}
+                          </div>
+                          <div className="pb-3">
+                            <p className="font-medium">{event.stage}</p>
+                            <p className="text-muted-foreground">
+                              {event.action}
+                            </p>
+                            {event.confidence !== undefined && (
+                              <p className="text-muted-foreground font-mono">
+                                Confidence: {Math.round(event.confidence * 100)}%
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </motion.div>
+
+            {/* Right: Decision Panel */}
+            <motion.div
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Card className="sticky top-16">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-muted-foreground" />
+                    Human Decision
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                      Recommended
+                    </p>
+                    <div className="p-3 rounded-md bg-secondary/50 text-xs text-muted-foreground">
+                      {exc.recommended_action
+                        ? exc.recommended_action.replace(/_/g, " ")
+                        : "Review case and decide"}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {(
+                      [
+                        ["approve", "Approve Resolution", "success"],
+                        ["reject", "Reject Resolution", "destructive"],
+                        ["escalate", "Escalate to Senior", "warning"],
+                      ] as const
+                    ).map(([action, label, variant]) => (
+                      <button
+                        key={action}
+                        onClick={() => setSelectedAction(action)}
+                        className={`w-full flex items-center justify-between p-3 rounded-md border text-xs font-medium transition-all ${
+                          selectedAction === action
+                            ? `border-${variant === "success" ? "emerald" : variant === "destructive" ? "red" : "amber"}-500/40 bg-${variant === "success" ? "emerald" : variant === "destructive" ? "red" : "amber"}-500/10`
+                            : "border-border hover:bg-accent/50"
+                        }`}
+                      >
+                        <span>{label}</span>
+                        <div
+                          className={`h-3 w-3 rounded-full border-2 ${
+                            selectedAction === action
+                              ? `border-${variant === "success" ? "emerald" : variant === "destructive" ? "red" : "amber"}-500`
+                              : "border-muted-foreground/30"
+                          }`}
+                        >
+                          {selectedAction === action && (
+                            <div
+                              className={`h-full w-full rounded-full bg-${variant === "success" ? "emerald" : variant === "destructive" ? "red" : "amber"}-500 scale-50`}
+                            />
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] text-muted-foreground uppercase tracking-wider font-medium">
+                      Notes (optional)
+                    </label>
+                    <textarea
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Add review notes..."
+                      rows={3}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                    />
+                  </div>
+
+                  <Button
+                    onClick={() => handleAction(selectedAction)}
+                    disabled={submitting}
+                    variant={
+                      selectedAction === "approve"
+                        ? "success"
+                        : selectedAction === "reject"
+                        ? "destructive"
+                        : "default"
+                    }
+                    className="w-full"
+                  >
+                    {submitting
+                      ? "Processing..."
+                      : selectedAction === "approve"
+                      ? "Approve & Resolve"
+                      : selectedAction === "reject"
+                      ? "Reject"
+                      : "Escalate"}
+                  </Button>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
         </div>
       </main>
     </div>

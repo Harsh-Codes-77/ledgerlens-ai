@@ -32,6 +32,58 @@ export interface Batch {
   completed_at?: string;
 }
 
+export interface Transaction {
+  id: string;
+  batch_id: string;
+  external_transaction_id: string;
+  source: string;
+  amount: number;
+  currency: string;
+  status: string;
+  transaction_date: string;
+  payment_reference?: string;
+  customer_reference?: string;
+  metadata_json?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface TransactionDetail {
+  transaction: Transaction;
+  settlement: Settlement | null;
+  reconciliation_result: ReconciliationResult | null;
+  exception: ExceptionCase | null;
+  refund: any | null;
+  audit_logs: AuditLog[];
+}
+
+export interface Settlement {
+  id: string;
+  batch_id: string;
+  external_settlement_id: string;
+  source: string;
+  amount: number;
+  currency: string;
+  settlement_date: string;
+  reference?: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ReconciliationResult {
+  id: string;
+  batch_id: string;
+  source_record_id: string;
+  source_type: string;
+  matched_record_id: string | null;
+  match_type: string;
+  confidence_score: number;
+  decision: string;
+  reason: string;
+  amount_difference: number;
+  metadata_json?: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface ExceptionCase {
   id: string;
   reconciliation_result_id: string;
@@ -63,32 +115,26 @@ export interface ExceptionCase {
   };
   settlement_search?: {
     records_checked: number;
-    matching_reference: string;
-    closest_amount_match: string;
-    closest_date_diff: string;
+    matching_references: string[];
+    closest_matches: Array<{
+      settlement_id: string;
+      similarity_score: number;
+    }>;
   };
-  timeline?: Array<{
-    time: string;
-    event: string;
+  decision_timeline?: Array<{
+    stage: string;
+    action: string;
+    outcome: string;
+    confidence?: number;
+  }>;
+  related_records?: Array<{
+    type: string;
+    id: string;
+    source: string;
+    amount: number;
   }>;
   created_at: string;
-  updated_at: string;
-}
-
-export interface ReconciliationResult {
-  id: string;
-  batch_id: string;
-  source_record_id: string;
-  matched_record_id?: string;
-  match_type: string;
-  status: string;
-  confidence_score: number;
-  amount_difference: number;
-  date_difference: number;
-  decision: string;
-  reason?: string;
-  created_at: string;
-  exception_case?: ExceptionCase;
+  updated_at?: string;
 }
 
 export interface AuditLog {
@@ -98,53 +144,27 @@ export interface AuditLog {
   action: string;
   actor_type: string;
   actor_id?: string;
-  before_state?: any;
-  after_state?: any;
+  before_state?: Record<string, unknown>;
+  after_state?: Record<string, unknown>;
   reason?: string;
-  metadata_json?: any;
-  created_at: string;
-}
-
-export interface Transaction {
-  id: string;
-  external_transaction_id: string;
-  source: string;
-  amount: number;
-  currency: string;
-  status: string;
-  transaction_date: string;
-  customer_reference?: string;
-  payment_reference?: string;
-  created_at: string;
-}
-
-export interface Settlement {
-  id: string;
-  external_settlement_id: string;
-  source: string;
-  amount: number;
-  currency: string;
-  settlement_date: string;
-  reference?: string;
-  status: string;
+  metadata_json?: Record<string, unknown>;
   created_at: string;
 }
 
 export interface EvaluationData {
   batch_id: string;
   total_records: number;
-  matched_count: number;
-  auto_resolved: number;
-  escalated: number;
-  recommended: number;
-  accuracy: number;
-  auto_resolution_rate: number;
-  escalation_rate: number;
-  processing_time_seconds: number;
-  known_failures: Array<{
-    case: string;
+  correct_matches: number;
+  incorrect_matches: number;
+  false_positives: number;
+  false_negatives: number;
+  escalation_precision?: number;
+  match_type_accuracy?: Record<string, number>;
+  resolution_distribution?: Record<string, number>;
+  known_failures?: Array<{
+    type: string;
+    description: string;
     expected: string;
-    actual: string;
-    reason: string;
+    got: string;
   }>;
 }
