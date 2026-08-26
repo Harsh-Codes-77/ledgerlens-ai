@@ -10,7 +10,8 @@ import {
   Landmark,
   History,
   BarChart3,
-  Cpu
+  Cpu,
+  GitBranch,
 } from "lucide-react";
 
 const navItems = [
@@ -21,6 +22,7 @@ const navItems = [
   { name: "Settlements", href: "/settlements", icon: Landmark },
   { name: "Audit Log", href: "/audit-log", icon: History },
   { name: "Evaluation", href: "/evaluation", icon: BarChart3 },
+  { name: "How It Works", href: "/workflow", icon: GitBranch },
 ];
 
 export default function Sidebar() {
