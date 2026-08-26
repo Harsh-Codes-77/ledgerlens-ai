@@ -254,4 +254,3 @@ make run-web
 - [Architecture Guide](docs/architecture.md)
 - [Architectural Decision Records (ADRs)](docs/decisions.md)
 - [Evaluation Methodology](docs/evaluation.md)
-- [5-Minute Demo Script](docs/demo-script.md)
