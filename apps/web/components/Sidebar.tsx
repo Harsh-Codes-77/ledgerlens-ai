@@ -17,12 +17,14 @@ import {
   ChevronRight,
   Cpu,
   Circle,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { name: "Command Center", href: "/", icon: LayoutDashboard },
   { name: "Reconciliation Runs", href: "/batches", icon: Layers },
+  { name: "Upload Batch", href: "/batches/upload", icon: Upload },
   { name: "Transactions", href: "/transactions", icon: Receipt },
   { name: "Settlements", href: "/settlements", icon: Landmark },
   { name: "Exceptions", href: "/exceptions", icon: AlertTriangle },

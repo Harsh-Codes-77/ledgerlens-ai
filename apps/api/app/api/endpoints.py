@@ -3,8 +3,13 @@ import json
 import time
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+import csv
+import io
+import json
+from typing import List, Optional
 
 from app.database.session import get_db
 from app.models.domain import (
@@ -124,6 +129,121 @@ def create_batch(req: BatchCreateRequest, db: Session = Depends(get_db)):
             db, entity_type="batch", entity_id=batch.id, action="INGEST",
             actor_type="system", reason=f"Ingested {len(txns)} demo transactions and {len(sets)} settlements."
         )
+
+    return batch
+
+class BatchUploadRequest(BaseModel):
+    name: str
+
+@router.post("/batches/upload", response_model=BatchSchema)
+async def upload_batch(
+    name: str = Form(...),
+    transactions: UploadFile = File(...),
+    settlements: UploadFile = File(...),
+    refunds: UploadFile = File(None),
+    db: Session = Depends(get_db)
+) -> BatchSchema:
+    batch = Batch(
+        name=name,
+        status="PENDING",
+        total_records=0
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+
+    create_audit_entry(
+        db, entity_type="batch", entity_id=batch.id, action="CREATE",
+        actor_type="user", reason=f"Batch '{name}' created from file upload."
+    )
+
+    txn_count = 0
+    set_count = 0
+    ref_count = 0
+
+    # Parse transactions CSV/JSON
+    txn_content = await transactions.read()
+    if transactions.filename.endswith('.json'):
+        txn_data = json.loads(txn_content)
+    else:
+        # CSV parsing
+        reader = csv.DictReader(io.StringIO(txn_content.decode()))
+        txn_data = list(reader)
+
+    txns = []
+    for t in txn_data:
+        dt = datetime.fromisoformat(t["transaction_date"])
+        txns.append(Transaction(
+            batch_id=batch.id,
+            external_transaction_id=t["external_transaction_id"],
+            source=t["source"],
+            amount=float(t["amount"]),
+            currency=t.get("currency", "INR"),
+            status=t.get("status", "captured"),
+            transaction_date=dt,
+            customer_reference=t.get("customer_reference"),
+            payment_reference=t.get("payment_reference"),
+            metadata_json=t.get("metadata")
+        ))
+    db.bulk_save_objects(txns)
+    txn_count = len(txns)
+
+    # Parse settlements CSV/JSON
+    set_content = await settlements.read()
+    if settlements.filename.endswith('.json'):
+        set_data = json.loads(set_content)
+    else:
+        reader = csv.DictReader(io.StringIO(set_content.decode()))
+        set_data = list(reader)
+
+    sets = []
+    for s in set_data:
+        s_dt = datetime.fromisoformat(s["settlement_date"])
+        sets.append(Settlement(
+            batch_id=batch.id,
+            external_settlement_id=s["external_settlement_id"],
+            source=s["source"],
+            amount=float(s["amount"]),
+            currency=s.get("currency", "INR"),
+            settlement_date=s_dt,
+            reference=s.get("reference"),
+            status=s.get("status", "settled"),
+            metadata_json=s.get("metadata")
+        ))
+    db.bulk_save_objects(sets)
+    set_count = len(sets)
+
+    # Parse refunds CSV/JSON (optional)
+    if refunds:
+        ref_content = await refunds.read()
+        if refunds.filename.endswith('.json'):
+            ref_data = json.loads(ref_content)
+        else:
+            reader = csv.DictReader(io.StringIO(ref_content.decode()))
+            ref_data = list(reader)
+
+        ref_objs = []
+        for r in ref_data:
+            r_dt = datetime.fromisoformat(r["refund_date"])
+            ref_objs.append(Refund(
+                external_refund_id=r["external_refund_id"],
+                transaction_reference=r["transaction_reference"],
+                amount=float(r["amount"]),
+                currency=r.get("currency", "INR"),
+                refund_date=r_dt,
+                status=r.get("status", "processed")
+            ))
+        db.bulk_save_objects(ref_objs)
+        ref_count = len(ref_objs)
+
+    batch.total_records = txn_count
+    db.commit()
+    db.refresh(batch)
+
+    create_audit_entry(
+        db, entity_type="batch", entity_id=batch.id, action="INGEST",
+        actor_type="system", reason=f"Ingested {txn_count} transactions, {set_count} settlements, {ref_count} refunds from file upload."
+    )
 
     return batch
 

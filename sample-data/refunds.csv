@@ -1,0 +1,3 @@
+external_refund_id,transaction_reference,amount,currency,refund_date,status
+REF_001,PAY_REF_003,250.00,INR,2026-01-16T10:00:00,processed
+REF_002,PAY_REF_006,50.00,INR,2026-01-16T11:00:00,processed
