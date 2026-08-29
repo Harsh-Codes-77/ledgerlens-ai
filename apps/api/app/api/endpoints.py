@@ -333,10 +333,62 @@ def get_exception(exception_id: str, db: Session = Depends(get_db)):
         "source": txn.source if txn else "razorpay"
     }
 
+    # Find candidate settlements in the database
+    candidate_matches = []
+    if txn:
+        # Search settlements in same batch or by reference / amount
+        sets_q = db.query(Settlement)
+        if txn.batch_id:
+            sets_q = sets_q.filter(Settlement.batch_id == txn.batch_id)
+        candidate_pool = sets_q.limit(100).all()
+
+        for s in candidate_pool:
+            score = 0
+            # Reference match
+            if txn.payment_reference and s.reference and txn.payment_reference in s.reference:
+                score += 50
+            elif txn.payment_reference and s.external_settlement_id and txn.payment_reference in s.external_settlement_id:
+                score += 40
+            
+            # Amount proximity
+            amt_diff = abs(txn.amount - s.amount)
+            if amt_diff < 0.01:
+                score += 40
+            elif amt_diff <= txn.amount * 0.02:
+                score += 25
+            elif amt_diff <= txn.amount * 0.05:
+                score += 15
+
+            # Date proximity
+            try:
+                date_diff_days = abs((s.settlement_date - txn.transaction_date).total_seconds()) / 86400.0
+                if date_diff_days <= 2:
+                    score += 10
+                elif date_diff_days <= 5:
+                    score += 5
+            except Exception:
+                date_diff_days = 999
+
+            if score >= 15 or (rec_res and rec_res.matched_record_id == s.external_settlement_id):
+                candidate_matches.append({
+                    "settlement_id": s.external_settlement_id,
+                    "source": s.source,
+                    "amount": s.amount,
+                    "currency": s.currency,
+                    "settlement_date": s.settlement_date.strftime("%Y-%m-%d %H:%M"),
+                    "reference": s.reference or "—",
+                    "status": s.status,
+                    "amount_difference": round(amt_diff, 2),
+                    "confidence_score": round(min(1.0, score / 100.0), 2)
+                })
+
+        candidate_matches.sort(key=lambda x: x["confidence_score"], reverse=True)
+        candidate_matches = candidate_matches[:5]
+
     set_search = {
         "records_checked": 500,
         "matching_reference": txn.payment_reference if txn and rec_res and rec_res.match_type == "EXACT" else "None",
-        "closest_amount_match": rec_res.matched_record_id if rec_res and rec_res.matched_record_id else "SET_123",
+        "closest_amount_match": rec_res.matched_record_id if rec_res and rec_res.matched_record_id else (candidate_matches[0]["settlement_id"] if candidate_matches else "SET_123"),
         "closest_date_diff": f"+{rec_res.date_difference:.0f} days" if rec_res and rec_res.date_difference > 0 else "+2 days"
     }
 
@@ -357,10 +409,18 @@ def get_exception(exception_id: str, db: Session = Depends(get_db)):
         {"time": t_status.strftime("%H:%M"), "event": f"Case status: {exc.status}"}
     ]
 
+    # Find next pending exception
+    next_pending = db.query(ExceptionCase).filter(
+        ExceptionCase.id != exc.id,
+        ExceptionCase.status.in_(["PENDING_REVIEW", "ESCALATED"])
+    ).order_by(ExceptionCase.created_at.desc()).first()
+
     schema_data = ExceptionCaseSchema.model_validate(exc)
     schema_data.transaction_details = txn_details
     schema_data.settlement_search = set_search
+    schema_data.candidate_matches = candidate_matches
     schema_data.timeline = timeline
+    schema_data.next_pending_id = next_pending.id if next_pending else None
     return schema_data
 
 @router.post("/exceptions/{exception_id}/approve", response_model=ExceptionCaseSchema)
@@ -369,18 +429,50 @@ def approve_exception(exception_id: str, req: ResolutionActionRequest, db: Sessi
     if not exc:
         raise HTTPException(status_code=404, detail="Exception case not found")
 
+    rec_res = db.query(ReconciliationResult).filter(ReconciliationResult.id == exc.reconciliation_result_id).first()
+    txn = None
+    if rec_res:
+        txn = db.query(Transaction).filter(Transaction.external_transaction_id == rec_res.source_record_id).first()
+
     before_state = {"status": exc.status}
     exc.status = "APPROVED"
     exc.resolved_by = req.actor_id
-    exc.resolution_notes = req.notes or "Recommendation approved by operator."
+    exc.resolution_notes = req.notes or "AI resolution recommendation approved by controller."
+
+    # Update ReconciliationResult
+    if rec_res:
+        rec_res.status = "RESOLVED"
+        rec_res.decision = "HUMAN_APPROVED"
+        if req.matched_settlement_id:
+            rec_res.matched_record_id = req.matched_settlement_id
+        if req.notes:
+            rec_res.reason = f"Human Approved: {req.notes}"
+
+    # Update Transaction
+    if txn:
+        txn.status = "reconciled"
+
+    # Update Batch Statistics
+    if rec_res and rec_res.batch_id:
+        batch = db.query(Batch).filter(Batch.id == rec_res.batch_id).first()
+        if batch:
+            batch.auto_resolved_count = (batch.auto_resolved_count or 0) + 1
+            if batch.escalated_count and batch.escalated_count > 0:
+                batch.escalated_count -= 1
+            if batch.exception_count and batch.exception_count > 0:
+                batch.exception_count -= 1
+            batch.matched_count = (batch.matched_count or 0) + 1
+            if batch.total_records > 0:
+                batch.match_rate = round((batch.matched_count / batch.total_records) * 100.0, 2)
+
     db.commit()
     db.refresh(exc)
 
     create_audit_entry(
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_APPROVE",
         actor_type="user", actor_id=req.actor_id,
-        before_state=before_state, after_state={"status": "APPROVED"},
-        reason=req.notes or "Recommendation approved by operator."
+        before_state=before_state, after_state={"status": "APPROVED", "reconciliation": "RESOLVED", "txn": "reconciled"},
+        reason=req.notes or "AI resolution recommendation approved by controller."
     )
 
     return get_exception(exception_id, db)
@@ -391,17 +483,32 @@ def reject_exception(exception_id: str, req: ResolutionActionRequest, db: Sessio
     if not exc:
         raise HTTPException(status_code=404, detail="Exception case not found")
 
+    rec_res = db.query(ReconciliationResult).filter(ReconciliationResult.id == exc.reconciliation_result_id).first()
+    txn = None
+    if rec_res:
+        txn = db.query(Transaction).filter(Transaction.external_transaction_id == rec_res.source_record_id).first()
+
     before_state = {"status": exc.status}
     exc.status = "REJECTED"
     exc.resolved_by = req.actor_id
     exc.resolution_notes = req.notes or "Recommendation rejected by operator."
+
+    if rec_res:
+        rec_res.status = "REJECTED"
+        rec_res.decision = "HUMAN_REJECTED"
+        if req.notes:
+            rec_res.reason = f"Human Rejected: {req.notes}"
+
+    if txn:
+        txn.status = "disputed"
+
     db.commit()
     db.refresh(exc)
 
     create_audit_entry(
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_REJECT",
         actor_type="user", actor_id=req.actor_id,
-        before_state=before_state, after_state={"status": "REJECTED"},
+        before_state=before_state, after_state={"status": "REJECTED", "reconciliation": "REJECTED", "txn": "disputed"},
         reason=req.notes or "Recommendation rejected by operator."
     )
 
@@ -413,18 +520,76 @@ def escalate_exception(exception_id: str, req: ResolutionActionRequest, db: Sess
     if not exc:
         raise HTTPException(status_code=404, detail="Exception case not found")
 
+    rec_res = db.query(ReconciliationResult).filter(ReconciliationResult.id == exc.reconciliation_result_id).first()
+
     before_state = {"status": exc.status}
     exc.status = "ESCALATED"
-    exc.assigned_to = req.actor_id
-    exc.resolution_notes = req.notes or "Escalated to senior finance controller."
+    exc.assigned_to = req.actor_id or "senior_controller"
+    exc.resolution_notes = req.notes or "Escalated to senior finance controller for manual investigation."
+
+    if rec_res:
+        rec_res.status = "EXCEPTION"
+        rec_res.decision = "HUMAN_ESCALATED"
+
     db.commit()
     db.refresh(exc)
 
     create_audit_entry(
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_ESCALATE",
         actor_type="user", actor_id=req.actor_id,
-        before_state=before_state, after_state={"status": "ESCALATED"},
-        reason=req.notes or "Escalated to senior finance controller."
+        before_state=before_state, after_state={"status": "ESCALATED", "assigned_to": req.actor_id or "senior_controller"},
+        reason=req.notes or "Escalated to senior finance controller for manual investigation."
+    )
+
+    return get_exception(exception_id, db)
+
+@router.post("/exceptions/{exception_id}/manual-match", response_model=ExceptionCaseSchema)
+def manual_match_exception(exception_id: str, req: ResolutionActionRequest, db: Session = Depends(get_db)):
+    exc = db.query(ExceptionCase).filter(ExceptionCase.id == exception_id).first()
+    if not exc:
+        raise HTTPException(status_code=404, detail="Exception case not found")
+    if not req.matched_settlement_id:
+        raise HTTPException(status_code=400, detail="matched_settlement_id is required for manual match")
+
+    rec_res = db.query(ReconciliationResult).filter(ReconciliationResult.id == exc.reconciliation_result_id).first()
+    txn = None
+    if rec_res:
+        txn = db.query(Transaction).filter(Transaction.external_transaction_id == rec_res.source_record_id).first()
+
+    before_state = {"status": exc.status}
+    exc.status = "APPROVED"
+    exc.resolved_by = req.actor_id
+    exc.resolution_notes = req.notes or f"Manually matched with settlement record {req.matched_settlement_id}."
+
+    if rec_res:
+        rec_res.status = "RESOLVED"
+        rec_res.matched_record_id = req.matched_settlement_id
+        rec_res.match_type = "MANUAL_MATCH"
+        rec_res.decision = "MANUAL_MATCHED"
+        rec_res.confidence_score = 1.0
+        rec_res.reason = f"Controller manually linked to settlement {req.matched_settlement_id}."
+
+    if txn:
+        txn.status = "reconciled"
+
+    if rec_res and rec_res.batch_id:
+        batch = db.query(Batch).filter(Batch.id == rec_res.batch_id).first()
+        if batch:
+            batch.auto_resolved_count = (batch.auto_resolved_count or 0) + 1
+            if batch.escalated_count and batch.escalated_count > 0:
+                batch.escalated_count -= 1
+            batch.matched_count = (batch.matched_count or 0) + 1
+            if batch.total_records > 0:
+                batch.match_rate = round((batch.matched_count / batch.total_records) * 100.0, 2)
+
+    db.commit()
+    db.refresh(exc)
+
+    create_audit_entry(
+        db, entity_type="exception", entity_id=exc.id, action="MANUAL_MATCH",
+        actor_type="user", actor_id=req.actor_id,
+        before_state=before_state, after_state={"status": "APPROVED", "matched_settlement_id": req.matched_settlement_id},
+        reason=req.notes or f"Manually linked transaction to settlement {req.matched_settlement_id}."
     )
 
     return get_exception(exception_id, db)

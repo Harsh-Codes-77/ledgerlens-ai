@@ -84,6 +84,18 @@ export interface ReconciliationResult {
   created_at: string;
 }
 
+export interface CandidateMatch {
+  settlement_id: string;
+  source: string;
+  amount: number;
+  currency: string;
+  settlement_date: string;
+  reference: string;
+  status: string;
+  amount_difference: number;
+  confidence_score: number;
+}
+
 export interface ExceptionCase {
   id: string;
   reconciliation_result_id: string;
@@ -115,24 +127,16 @@ export interface ExceptionCase {
   };
   settlement_search?: {
     records_checked: number;
-    matching_references: string[];
-    closest_matches: Array<{
-      settlement_id: string;
-      similarity_score: number;
-    }>;
+    matching_reference: string;
+    closest_amount_match: string;
+    closest_date_diff: string;
   };
-  decision_timeline?: Array<{
-    stage: string;
-    action: string;
-    outcome: string;
-    confidence?: number;
+  candidate_matches?: CandidateMatch[];
+  timeline?: Array<{
+    time: string;
+    event: string;
   }>;
-  related_records?: Array<{
-    type: string;
-    id: string;
-    source: string;
-    amount: number;
-  }>;
+  next_pending_id?: string;
   created_at: string;
   updated_at?: string;
 }

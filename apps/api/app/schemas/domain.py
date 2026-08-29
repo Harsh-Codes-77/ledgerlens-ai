@@ -68,7 +68,9 @@ class ExceptionCaseSchema(BaseModel):
     resolution_notes: Optional[str] = None
     transaction_details: Optional[Dict[str, Any]] = None
     settlement_search: Optional[Dict[str, Any]] = None
+    candidate_matches: Optional[List[Dict[str, Any]]] = None
     timeline: Optional[List[Dict[str, Any]]] = None
+    next_pending_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -128,6 +130,8 @@ class BatchCreateRequest(BaseModel):
     record_count: int = 500
 
 class ResolutionActionRequest(BaseModel):
-    action: str  # approve, reject, escalate
+    action: str  # approve, reject, escalate, manual_match, write_off
     notes: Optional[str] = None
     actor_id: str = "human_operator"
+    matched_settlement_id: Optional[str] = None
+    write_off_amount: Optional[float] = None

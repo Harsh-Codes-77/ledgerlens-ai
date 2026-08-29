@@ -7,27 +7,43 @@ import TopBar from "@/components/Header";
 import { fetchApi, ExceptionCase } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ConfidenceRing } from "@/components/ui/confidence-ring";
+import { MetricCard } from "@/components/ui/metric-card";
 import { LoadingState, EmptyState } from "@/components/ui/states";
-import { AlertTriangle, Filter, ArrowRight } from "lucide-react";
+import {
+  AlertTriangle,
+  Filter,
+  ArrowRight,
+  ShieldAlert,
+  CheckCircle2,
+  Clock,
+  Zap,
+  Play,
+  Layers,
+} from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
+
+type TabFilter = "all" | "pending" | "escalated" | "resolved" | "rejected";
 
 export default function ExceptionsPage() {
   const [exceptions, setExceptions] = useState<ExceptionCase[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [activeTab, setActiveTab] = useState<TabFilter>("pending");
   const [typeFilter, setTypeFilter] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("");
   const [sortBy, setSortBy] = useState<"severity" | "confidence" | "date">("severity");
 
   useEffect(() => {
     loadExceptions();
-  }, [statusFilter, typeFilter]);
+  }, [typeFilter, severityFilter]);
 
   async function loadExceptions() {
     try {
       setLoading(true);
       let query = "/api/exceptions?";
-      if (statusFilter) query += `status=${statusFilter}&`;
       if (typeFilter) query += `exception_type=${typeFilter}&`;
+      if (severityFilter) query += `severity=${severityFilter}&`;
       const data = await fetchApi<ExceptionCase[]>(query);
       setExceptions(data);
     } catch (e) {
@@ -37,8 +53,43 @@ export default function ExceptionsPage() {
     }
   }
 
+  // Calculate Metrics
+  const stats = useMemo(() => {
+    const pending = exceptions.filter((e) => e.status === "PENDING_REVIEW");
+    const escalated = exceptions.filter((e) => e.status === "ESCALATED");
+    const resolved = exceptions.filter((e) => e.status === "APPROVED" || e.status === "AUTO_RESOLVED");
+    const rejected = exceptions.filter((e) => e.status === "REJECTED");
+    const totalExposure = [...pending, ...escalated].reduce(
+      (acc, e) => acc + (e.transaction_details?.amount || 0),
+      0
+    );
+
+    return {
+      total: exceptions.length,
+      pendingCount: pending.length,
+      escalatedCount: escalated.length,
+      resolvedCount: resolved.length,
+      rejectedCount: rejected.length,
+      actionableCount: pending.length + escalated.length,
+      totalExposure,
+      firstPendingId: [...pending, ...escalated][0]?.id,
+    };
+  }, [exceptions]);
+
+  // Filter based on active tab
+  const tabFiltered = useMemo(() => {
+    return exceptions.filter((e) => {
+      if (activeTab === "pending") return e.status === "PENDING_REVIEW";
+      if (activeTab === "escalated") return e.status === "ESCALATED";
+      if (activeTab === "resolved") return e.status === "APPROVED" || e.status === "AUTO_RESOLVED";
+      if (activeTab === "rejected") return e.status === "REJECTED";
+      return true;
+    });
+  }, [exceptions, activeTab]);
+
+  // Sort
   const sorted = useMemo(() => {
-    const copy = [...exceptions];
+    const copy = [...tabFiltered];
     if (sortBy === "confidence") {
       copy.sort((a, b) => a.confidence_score - b.confidence_score);
     } else if (sortBy === "date") {
@@ -59,90 +110,151 @@ export default function ExceptionsPage() {
       );
     }
     return copy;
-  }, [exceptions, sortBy]);
+  }, [tabFiltered, sortBy]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      <TopBar />
+      <TopBar title="Exceptions Management & Human Review Queue" />
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-[1400px] mx-auto p-6 space-y-4">
+        <div className="max-w-[1400px] mx-auto p-6 space-y-5">
+          {/* Header & Quick Action */}
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col md:flex-row md:items-center justify-between gap-3"
+            className="flex flex-col md:flex-row md:items-center justify-between gap-4"
           >
             <div>
-              <h2 className="text-lg font-bold tracking-tight">
-                Exceptions Queue
+              <h2 className="text-xl font-bold tracking-tight">
+                Exception Investigation Queue
               </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {sorted.length} cases requiring review
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Review, manually match, or escalate ambiguous financial transactions
               </p>
             </div>
+            {stats.firstPendingId && (
+              <Button asChild size="default" className="shrink-0">
+                <Link href={`/exceptions/${stats.firstPendingId}`}>
+                  <Play className="h-3.5 w-3.5 mr-2 fill-current" />
+                  Start Reviewing Queue ({stats.actionableCount} Pending)
+                </Link>
+              </Button>
+            )}
           </motion.div>
 
-          {/* Filters */}
+          {/* Quick Metrics */}
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
-            className="flex flex-wrap items-center gap-2"
+            className="grid grid-cols-2 lg:grid-cols-4 gap-3"
           >
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Filter className="h-3.5 w-3.5" />
-              <span>Filter:</span>
-            </div>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">All Status</option>
-              <option value="PENDING_REVIEW">Pending Review</option>
-              <option value="ESCALATED">Escalated</option>
-              <option value="AUTO_RESOLVED">Auto-Resolved</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-            </select>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">All Types</option>
-              <option value="missing_settlement">Missing Settlement</option>
-              <option value="amount_mismatch">Amount Mismatch</option>
-              <option value="date_mismatch">Date Mismatch</option>
-              <option value="duplicate_reference">Duplicate Reference</option>
-              <option value="invalid_data">Invalid Data</option>
-              <option value="ambiguous_match">Ambiguous Match</option>
-              <option value="partial_refund">Partial Refund</option>
-            </select>
-            <div className="h-4 w-px bg-border" />
-            <span className="text-[11px] text-muted-foreground">Sort:</span>
-            {(["severity", "confidence", "date"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setSortBy(s)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                  sortBy === s
-                    ? "bg-secondary text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {s === "date" ? "Newest" : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
+            <MetricCard
+              label="Actionable Exposure"
+              value={formatCurrency(stats.totalExposure)}
+              subtitle={`${stats.actionableCount} pending / escalated`}
+              icon={<ShieldAlert className="h-4 w-4 text-amber-400" />}
+            />
+            <MetricCard
+              label="Pending Controller Review"
+              value={stats.pendingCount}
+              subtitle="Awaiting decision"
+              icon={<Clock className="h-4 w-4 text-amber-400" />}
+            />
+            <MetricCard
+              label="Senior Escalations"
+              value={stats.escalatedCount}
+              subtitle="Requires senior review"
+              icon={<AlertTriangle className="h-4 w-4 text-red-400" />}
+            />
+            <MetricCard
+              label="Resolved by Humans / AI"
+              value={stats.resolvedCount}
+              subtitle="Successfully reconciled"
+              icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+            />
           </motion.div>
+
+          {/* Tab Navigation */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              {[
+                { key: "pending", label: "Pending Review", count: stats.pendingCount, color: "text-amber-400" },
+                { key: "escalated", label: "Escalated", count: stats.escalatedCount, color: "text-red-400" },
+                { key: "resolved", label: "Resolved", count: stats.resolvedCount, color: "text-emerald-400" },
+                { key: "rejected", label: "Rejected", count: stats.rejectedCount, color: "text-muted-foreground" },
+                { key: "all", label: "All Cases", count: stats.total, color: "text-foreground" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key as TabFilter)}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                    activeTab === tab.key
+                      ? "bg-secondary text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded bg-background/80 ${tab.color}`}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Filter Dropdowns */}
+            <div className="flex items-center gap-2">
+              <select
+                value={typeFilter}
+                onChange={(e) => setTypeFilter(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">All Types</option>
+                <option value="missing_settlement">Missing Settlement</option>
+                <option value="amount_mismatch">Amount Mismatch</option>
+                <option value="date_mismatch">Date Mismatch</option>
+                <option value="duplicate_reference">Duplicate Reference</option>
+                <option value="invalid_data">Invalid Data</option>
+                <option value="ambiguous_match">Ambiguous Match</option>
+                <option value="partial_refund">Partial Refund</option>
+              </select>
+
+              <select
+                value={severityFilter}
+                onChange={(e) => setSeverityFilter(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">All Severities</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+              </select>
+
+              <div className="h-4 w-px bg-border mx-1" />
+              {(["severity", "confidence", "date"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSortBy(s)}
+                  className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                    sortBy === s
+                      ? "bg-secondary text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {s === "date" ? "Newest" : s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Exception Cards */}
           {loading ? (
-            <LoadingState message="Loading exceptions..." />
+            <LoadingState message="Loading exception queue..." />
           ) : sorted.length === 0 ? (
             <EmptyState
-              icon={<AlertTriangle className="h-5 w-5" />}
-              title="Everything reconciled"
-              description="Nothing needs your attention. All records have been matched or resolved."
+              icon={<CheckCircle2 className="h-6 w-6 text-emerald-400" />}
+              title="No exceptions in this queue"
+              description="All cases in this category are clear. Switch tabs or check other queues."
             />
           ) : (
             <motion.div
@@ -150,9 +262,9 @@ export default function ExceptionsPage() {
               animate="show"
               variants={{
                 hidden: {},
-                show: { transition: { staggerChildren: 0.04 } },
+                show: { transition: { staggerChildren: 0.03 } },
               }}
-              className="space-y-2"
+              className="space-y-2.5"
             >
               {sorted.map((exc) => (
                 <motion.div
@@ -166,7 +278,7 @@ export default function ExceptionsPage() {
                     href={`/exceptions/${exc.id}`}
                     className="block group"
                   >
-                    <Card className="hover:bg-accent/30 transition-all cursor-pointer">
+                    <Card className="hover:bg-accent/30 transition-all cursor-pointer border border-border">
                       <CardContent className="p-4">
                         <div className="flex items-center gap-4">
                           <ConfidenceRing
@@ -187,35 +299,45 @@ export default function ExceptionsPage() {
                               >
                                 {exc.severity}
                               </Badge>
-                              <span className="text-xs font-medium font-mono">
-                                {exc.exception_type.replace(/_/g, " ")}
+                              <span className="text-xs font-semibold font-mono">
+                                {exc.exception_type.replace(/_/g, " ").toUpperCase()}
                               </span>
+                              {exc.transaction_details && (
+                                <span className="text-xs font-mono font-bold text-foreground">
+                                  {formatCurrency(exc.transaction_details.amount, exc.transaction_details.currency)}
+                                </span>
+                              )}
                             </div>
                             <p className="text-xs text-muted-foreground line-clamp-1">
-                              {exc.ai_analysis?.summary ||
-                                "Awaiting investigation"}
+                              {exc.ai_analysis?.summary || "Awaiting human controller investigation."}
                             </p>
                             {exc.transaction_details && (
                               <p className="text-[11px] text-muted-foreground font-mono mt-1">
-                                {exc.transaction_details.external_transaction_id}{" "}
-                                · ₹
-                                {exc.transaction_details.amount.toLocaleString()}
+                                {exc.transaction_details.external_transaction_id} · Source: {exc.transaction_details.source} · Ref: {exc.transaction_details.payment_reference || "None"}
                               </p>
                             )}
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="text-right hidden sm:block">
+                              <span className="text-[10px] text-muted-foreground uppercase block font-medium">
+                                Recommendation
+                              </span>
+                              <span className="text-xs font-mono font-medium text-foreground uppercase">
+                                {exc.recommended_action?.replace(/_/g, " ") || "REVIEW"}
+                              </span>
+                            </div>
                             <Badge
                               variant={
-                                exc.status === "AUTO_RESOLVED"
+                                exc.status === "APPROVED" || exc.status === "AUTO_RESOLVED"
                                   ? "success"
                                   : exc.status === "ESCALATED"
                                   ? "destructive"
-                                  : "secondary"
+                                  : "warning"
                               }
                             >
                               {exc.status.replace(/_/g, " ")}
                             </Badge>
-                            <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
                           </div>
                         </div>
                       </CardContent>
