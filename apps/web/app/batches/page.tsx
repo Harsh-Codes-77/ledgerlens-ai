@@ -10,13 +10,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ConfidenceRing } from "@/components/ui/confidence-ring";
 import { LoadingState, EmptyState } from "@/components/ui/states";
-import { Play, Layers, ArrowRight, Clock, CheckCircle2 } from "lucide-react";
+import { Play, Layers, ArrowRight, Clock, CheckCircle2, Trash2, AlertTriangle } from "lucide-react";
 
 export default function BatchesPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [batchName, setBatchName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string>("");
 
   useEffect(() => {
     loadBatches();
@@ -56,6 +58,17 @@ export default function BatchesPage() {
       console.error(err);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleDeleteBatch(batchId: string) {
+    try {
+      await fetchApi(`/api/batches/${batchId}`, { method: "DELETE" });
+      await loadBatches();
+      setDeletingId(null);
+      setDeleteConfirm("");
+    } catch (err) {
+      console.error(err);
     }
   }
 
@@ -125,25 +138,40 @@ export default function BatchesPage() {
                     <Card className="hover:bg-accent/30 transition-all cursor-pointer h-full">
                       <CardContent className="p-5">
                         <div className="flex items-start justify-between mb-4">
-                          <div>
-                            <h3 className="text-sm font-semibold group-hover:text-foreground transition-colors">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-semibold group-hover:text-foreground transition-colors truncate">
                               {b.name}
                             </h3>
                             <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
                               {b.id.substring(0, 8)}
                             </p>
                           </div>
-                          <Badge
-                            variant={
-                              b.status === "COMPLETED"
-                                ? "success"
-                                : b.status === "PROCESSING"
-                                ? "warning"
-                                : "secondary"
-                            }
-                          >
-                            {b.status}
-                          </Badge>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Badge
+                              variant={
+                                b.status === "COMPLETED"
+                                  ? "success"
+                                  : b.status === "PROCESSING"
+                                  ? "warning"
+                                  : "secondary"
+                              }
+                            >
+                              {b.status}
+                            </Badge>
+                            {deletingId !== b.id && (
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setDeletingId(b.id);
+                                }}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-400/10 transition-colors"
+                                title="Delete batch"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-4 mb-4">
@@ -178,6 +206,42 @@ export default function BatchesPage() {
                             {b.processing_time_seconds}s
                           </div>
                         </div>
+
+                        {deletingId === b.id && (
+                          <div className="mt-4 p-3 rounded-md bg-red-500/10 border border-red-500/30">
+                            <p className="text-xs text-red-400 font-medium mb-2">
+                              Delete "{b.name}"? This cannot be undone.
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                placeholder="Type batch name to confirm"
+                                value={deleteConfirm}
+                                onChange={(e) => setDeleteConfirm(e.target.value)}
+                                className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-red-500"
+                              />
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={deleteConfirm !== b.name}
+                                onClick={() => handleDeleteBatch(b.id)}
+                              >
+                                <Trash2 className="h-3 w-3 mr-1.5" />
+                                Delete
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setDeletingId(null);
+                                  setDeleteConfirm("");
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   </Link>

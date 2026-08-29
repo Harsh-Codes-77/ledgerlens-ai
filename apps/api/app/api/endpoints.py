@@ -258,6 +258,22 @@ def get_batch(batch_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Batch not found")
     return batch
 
+@router.delete("/batches/{batch_id}")
+def delete_batch(batch_id: str, db: Session = Depends(get_db)):
+    batch = db.query(Batch).filter(Batch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    create_audit_entry(
+        db, entity_type="batch", entity_id=batch_id, action="DELETE",
+        actor_type="user", reason=f"Batch '{batch.name}' and all associated data deleted by user."
+    )
+
+    db.delete(batch)
+    db.commit()
+
+    return {"message": f"Batch '{batch.name}' and all associated data deleted successfully"}
+
 @router.post("/batches/{batch_id}/process", response_model=BatchSchema)
 def process_batch(batch_id: str, db: Session = Depends(get_db)):
     batch = db.query(Batch).filter(Batch.id == batch_id).first()
