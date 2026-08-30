@@ -56,6 +56,7 @@ class AIInvestigationResult(BaseModel):
 
 class ExceptionCaseSchema(BaseModel):
     id: str
+    batch_id: Optional[str] = None
     reconciliation_result_id: str
     exception_type: str
     severity: str
@@ -111,6 +112,7 @@ class BatchSchema(BaseModel):
 
 class AuditLogSchema(BaseModel):
     id: str
+    batch_id: Optional[str] = None
     entity_type: str
     entity_id: str
     action: str

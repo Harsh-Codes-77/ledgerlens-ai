@@ -115,6 +115,7 @@ export default function BatchUploadPage() {
             </p>
           </motion.div>
 
+          <form id="upload-form" onSubmit={handleUpload}>
           <Card>
             <CardHeader>
               <CardTitle>Batch Details</CardTitle>
@@ -188,6 +189,7 @@ export default function BatchUploadPage() {
               </div>
             </CardContent>
           </Card>
+          </form>
 
           {result && (
             <Card className={result.success ? "border-emerald-500/30" : "border-red-500/30"}>

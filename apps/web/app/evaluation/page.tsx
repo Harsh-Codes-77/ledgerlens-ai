@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import TopBar from "@/components/Header";
+import { useSession } from "@/lib/session-context";
 import { fetchApi, Batch, EvaluationData } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { MetricCard } from "@/components/ui/metric-card";
@@ -29,22 +30,25 @@ import {
 const PIE_COLORS = ["#10b981", "#f59e0b", "#0ea5e9", "#ef4444", "#8b5cf6"];
 
 export default function EvaluationPage() {
+  const { selectedBatchId, batches } = useSession();
   const [evalData, setEvalData] = useState<EvaluationData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadEvaluation();
-  }, []);
+  }, [selectedBatchId, batches]);
 
   async function loadEvaluation() {
     try {
       setLoading(true);
-      const batches = await fetchApi<Batch[]>("/api/batches");
-      if (batches.length > 0) {
+      const batchId = selectedBatchId || batches[0]?.id;
+      if (batchId) {
         const data = await fetchApi<EvaluationData>(
-          `/api/evaluation/${batches[0].id}`
+          `/api/evaluation/${batchId}`
         );
         setEvalData(data);
+      } else {
+        setEvalData(null);
       }
     } catch (e) {
       console.error(e);

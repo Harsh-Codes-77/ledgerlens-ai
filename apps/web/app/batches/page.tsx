@@ -2,17 +2,21 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import TopBar from "@/components/Header";
+import { useSession } from "@/lib/session-context";
 import { fetchApi, Batch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ConfidenceRing } from "@/components/ui/confidence-ring";
 import { LoadingState, EmptyState } from "@/components/ui/states";
-import { Play, Layers, Clock, CheckCircle2, Trash2, AlertTriangle } from "lucide-react";
+import { Play, Layers, Clock, CheckCircle2, Trash2, AlertTriangle, ClipboardCheck } from "lucide-react";
 
 export default function BatchesPage() {
+  const { setSelectedBatchId } = useSession();
+  const router = useRouter();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [loading, setLoading] = useState(true);
   const [batchName, setBatchName] = useState("");
@@ -70,6 +74,11 @@ export default function BatchesPage() {
     } catch (err) {
       console.error(err);
     }
+  }
+
+  function handleReview(batch: Batch) {
+    setSelectedBatchId(batch.id);
+    router.push("/exceptions");
   }
 
   return (
@@ -136,13 +145,13 @@ export default function BatchesPage() {
                 >
                   <div className="relative">
                     <Link
-                      href={`/batches/${b.id}`}
-                      className="block group"
-                      onClick={(e) => {
-                        if (deletingId === b.id) {
-                          e.preventDefault();
-                        }
-                      }}
+                      href={deletingId === b.id ? "#" : `/batches/${b.id}`}
+                      aria-disabled={deletingId === b.id}
+                      className={`block group ${
+                        deletingId === b.id
+                          ? "pointer-events-none"
+                          : ""
+                      }`}
                     >
                       <Card className="hover:bg-accent/30 transition-all cursor-pointer h-full">
                         <CardContent className="p-5">
@@ -215,47 +224,65 @@ export default function BatchesPage() {
                               {b.processing_time_seconds}s
                             </div>
                           </div>
-
-                          {deletingId === b.id && (
-                            <div className="mt-4 p-3 rounded-md bg-red-500/10 border border-red-500/30">
-                              <p className="text-xs text-red-400 font-medium mb-2">
-                                Delete "{b.name}"? This cannot be undone.
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  placeholder="Type batch name to confirm"
-                                  value={deleteConfirm}
-                                  onChange={(e) => setDeleteConfirm(e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-red-500"
-                                />
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={deleteConfirm !== b.name}
-                                  onClick={() => handleDeleteBatch(b.id)}
-                                >
-                                  <Trash2 className="h-3 w-3 mr-1.5" />
-                                  Delete
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeletingId(null);
-                                    setDeleteConfirm("");
-                                  }}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          )}
+                          <div className="mt-4 pt-3 border-t border-border flex items-center gap-2">
+                            <Button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleReview(b);
+                              }}
+                              size="sm"
+                              variant="secondary"
+                              className="flex-1"
+                            >
+                              <ClipboardCheck className="h-3.5 w-3.5 mr-1.5" />
+                              Review Exceptions ({b.exception_count})
+                            </Button>
+                          </div>
                         </CardContent>
                       </Card>
                     </Link>
+
+                    {deletingId === b.id && (
+                      <div
+                        className="absolute inset-0 z-20 flex items-center justify-center p-4 rounded-xl bg-background/95 backdrop-blur-sm border border-destructive/40 shadow-lg"
+                      >
+                        <div className="w-full">
+                          <p className="text-xs text-red-400 font-medium mb-2">
+                            Delete "{b.name}"? This cannot be undone.
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              autoFocus
+                              type="text"
+                              placeholder="Type batch name to confirm"
+                              value={deleteConfirm}
+                              onChange={(e) => setDeleteConfirm(e.target.value)}
+                              className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-red-500"
+                            />
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={deleteConfirm !== b.name}
+                              onClick={() => handleDeleteBatch(b.id)}
+                            >
+                              <Trash2 className="h-3 w-3 mr-1.5" />
+                              Delete
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setDeletingId(null);
+                                setDeleteConfirm("");
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ))}

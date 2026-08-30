@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
@@ -35,7 +36,8 @@ def create_audit_entry(
     before_state: Optional[dict] = None,
     after_state: Optional[dict] = None,
     reason: Optional[str] = None,
-    metadata_json: Optional[dict] = None
+    metadata_json: Optional[dict] = None,
+    batch_id: str = None
 ):
     audit = AuditLog(
         entity_type=entity_type,
@@ -46,7 +48,8 @@ def create_audit_entry(
         before_state=before_state,
         after_state=after_state,
         reason=reason,
-        metadata_json=metadata_json
+        metadata_json=metadata_json,
+        batch_id=batch_id
     )
     db.add(audit)
     db.commit()
@@ -70,7 +73,8 @@ def create_batch(req: BatchCreateRequest, db: Session = Depends(get_db)):
 
     create_audit_entry(
         db, entity_type="batch", entity_id=batch.id, action="CREATE",
-        actor_type="user", reason=f"Batch '{req.name}' created."
+        actor_type="user", reason=f"Batch '{req.name}' created.",
+        batch_id=batch.id
     )
 
     if req.use_demo_data:
@@ -127,7 +131,8 @@ def create_batch(req: BatchCreateRequest, db: Session = Depends(get_db)):
 
         create_audit_entry(
             db, entity_type="batch", entity_id=batch.id, action="INGEST",
-            actor_type="system", reason=f"Ingested {len(txns)} demo transactions and {len(sets)} settlements."
+            actor_type="system", reason=f"Ingested {len(txns)} demo transactions and {len(sets)} settlements.",
+            batch_id=batch.id
         )
 
     return batch
@@ -154,7 +159,8 @@ async def upload_batch(
 
     create_audit_entry(
         db, entity_type="batch", entity_id=batch.id, action="CREATE",
-        actor_type="user", reason=f"Batch '{name}' created from file upload."
+        actor_type="user", reason=f"Batch '{name}' created from file upload.",
+        batch_id=batch.id
     )
 
     txn_count = 0
@@ -242,7 +248,8 @@ async def upload_batch(
 
     create_audit_entry(
         db, entity_type="batch", entity_id=batch.id, action="INGEST",
-        actor_type="system", reason=f"Ingested {txn_count} transactions, {set_count} settlements, {ref_count} refunds from file upload."
+        actor_type="system", reason=f"Ingested {txn_count} transactions, {set_count} settlements, {ref_count} refunds from file upload.",
+        batch_id=batch.id
     )
 
     return batch
@@ -266,7 +273,8 @@ def delete_batch(batch_id: str, db: Session = Depends(get_db)):
 
     create_audit_entry(
         db, entity_type="batch", entity_id=batch_id, action="DELETE",
-        actor_type="user", reason=f"Batch '{batch.name}' and all associated data deleted by user."
+        actor_type="user", reason=f"Batch '{batch.name}' and all associated data deleted by user.",
+        batch_id=batch_id
     )
 
     db.delete(batch)
@@ -337,6 +345,9 @@ def process_batch(batch_id: str, db: Session = Depends(get_db)):
     escalated_cnt = 0
     exception_cnt = 0
 
+    # Phase 1: Deterministic reconciliation results (fast, local)
+    exception_payloads = []  # (item_index, payload) to investigate in parallel
+    rec_objs = []
     for item in rec_results:
         rec_obj = ReconciliationResult(
             batch_id=batch.id,
@@ -352,6 +363,7 @@ def process_batch(batch_id: str, db: Session = Depends(get_db)):
         )
         db.add(rec_obj)
         db.flush()
+        rec_objs.append(rec_obj)
 
         if item["match_type"] in ["EXACT", "TOLERANCE"] and item["status"] == "MATCHED":
             matched_cnt += 1
@@ -361,19 +373,38 @@ def process_batch(batch_id: str, db: Session = Depends(get_db)):
             create_audit_entry(
                 db, entity_type="reconciliation", entity_id=rec_obj.id,
                 action="AUTO_RESOLVE", actor_type="system",
-                reason=item["reason"]
+                reason=item["reason"],
+                batch_id=batch_id
             )
 
         if item["status"] == "EXCEPTION":
             exception_cnt += 1
-            # Run AI Investigation for exceptions
-            ai_payload = {
-                "transaction": next((t for t in txn_dicts if t["external_transaction_id"] == item["source_record_id"]), {}),
-                "candidate_matches": item.get("candidate_matches", []),
-                "exception_type": item["exception_type"],
-                "deterministic_checks": {"match_type": item["match_type"], "confidence": item["confidence_score"]}
-            }
-            ai_result = investigator.investigate_exception(ai_payload)
+            exception_payloads.append((
+                rec_obj,
+                item,
+                {
+                    "transaction": next((t for t in txn_dicts if t["external_transaction_id"] == item["source_record_id"]), {}),
+                    "candidate_matches": item.get("candidate_matches", []),
+                    "exception_type": item["exception_type"],
+                    "deterministic_checks": {"match_type": item["match_type"], "confidence": item["confidence_score"]}
+                }
+            ))
+
+    # Phase 2: AI investigations in parallel (the main speed bottleneck was
+    # sequential per-exception HTTP calls to the AI provider). Run them
+    # concurrently to cut processing time dramatically.
+    db.commit()  # persist reconciliation results before parallel work
+
+    max_workers = min(8, len(exception_payloads)) if exception_payloads else 1
+    futures = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for rec_obj, item, ai_payload in exception_payloads:
+            f = executor.submit(investigator.investigate_exception, ai_payload)
+            futures[f] = (rec_obj, item)
+
+        for f in as_completed(futures):
+            rec_obj, item = futures[f]
+            ai_result = f.result()
 
             case_status = "PENDING_REVIEW"
             if ai_result.recommended_action == "auto_resolve" and ai_result.ai_confidence >= 0.95:
@@ -400,7 +431,8 @@ def process_batch(batch_id: str, db: Session = Depends(get_db)):
                 db, entity_type="exception", entity_id=rec_obj.id,
                 action="AI_INVESTIGATE", actor_type="ai",
                 reason=ai_result.summary,
-                metadata_json=ai_result.model_dump()
+                metadata_json=ai_result.model_dump(),
+                batch_id=batch_id
             )
 
     duration = time.time() - start_time
@@ -419,7 +451,8 @@ def process_batch(batch_id: str, db: Session = Depends(get_db)):
 
     create_audit_entry(
         db, entity_type="batch", entity_id=batch.id, action="RECONCILE",
-        actor_type="system", reason=f"Processed batch of {len(txns)} records in {duration:.2f}s."
+        actor_type="system", reason=f"Processed batch of {len(txns)} records in {duration:.2f}s.",
+        batch_id=batch.id
     )
 
     return batch
@@ -436,6 +469,7 @@ def list_exceptions(
     status: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
     exception_type: Optional[str] = Query(None),
+    batch_id: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
     q = db.query(ExceptionCase)
@@ -445,7 +479,23 @@ def list_exceptions(
         q = q.filter(ExceptionCase.severity == severity)
     if exception_type:
         q = q.filter(ExceptionCase.exception_type == exception_type)
-    return q.order_by(ExceptionCase.created_at.desc()).all()
+
+    # Always join through ReconciliationResult so we can expose batch_id for grouping
+    q = q.join(ReconciliationResult)
+    if batch_id:
+        q = q.filter(ReconciliationResult.batch_id == batch_id)
+
+    rows = q.with_entities(
+        ExceptionCase,
+        ReconciliationResult.batch_id.label("_batch_id"),
+    ).order_by(ExceptionCase.created_at.desc()).all()
+
+    result = []
+    for exc, exc_batch_id in rows:
+        item = ExceptionCaseSchema.model_validate(exc).model_dump()
+        item["batch_id"] = exc_batch_id
+        result.append(item)
+    return result
 
 @router.get("/exceptions/{exception_id}", response_model=ExceptionCaseSchema)
 def get_exception(exception_id: str, db: Session = Depends(get_db)):
@@ -608,7 +658,8 @@ def approve_exception(exception_id: str, req: ResolutionActionRequest, db: Sessi
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_APPROVE",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "APPROVED", "reconciliation": "RESOLVED", "txn": "reconciled"},
-        reason=req.notes or "AI resolution recommendation approved by controller."
+        reason=req.notes or "AI resolution recommendation approved by controller.",
+        batch_id=rec_res.batch_id if rec_res else None
     )
 
     return get_exception(exception_id, db)
@@ -645,7 +696,8 @@ def reject_exception(exception_id: str, req: ResolutionActionRequest, db: Sessio
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_REJECT",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "REJECTED", "reconciliation": "REJECTED", "txn": "disputed"},
-        reason=req.notes or "Recommendation rejected by operator."
+        reason=req.notes or "Recommendation rejected by operator.",
+        batch_id=rec_res.batch_id if rec_res else None
     )
 
     return get_exception(exception_id, db)
@@ -674,7 +726,8 @@ def escalate_exception(exception_id: str, req: ResolutionActionRequest, db: Sess
         db, entity_type="exception", entity_id=exc.id, action="HUMAN_ESCALATE",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "ESCALATED", "assigned_to": req.actor_id or "senior_controller"},
-        reason=req.notes or "Escalated to senior finance controller for manual investigation."
+        reason=req.notes or "Escalated to senior finance controller for manual investigation.",
+        batch_id=rec_res.batch_id if rec_res else None
     )
 
     return get_exception(exception_id, db)
@@ -725,7 +778,8 @@ def manual_match_exception(exception_id: str, req: ResolutionActionRequest, db: 
         db, entity_type="exception", entity_id=exc.id, action="MANUAL_MATCH",
         actor_type="user", actor_id=req.actor_id,
         before_state=before_state, after_state={"status": "APPROVED", "matched_settlement_id": req.matched_settlement_id},
-        reason=req.notes or f"Manually linked transaction to settlement {req.matched_settlement_id}."
+        reason=req.notes or f"Manually linked transaction to settlement {req.matched_settlement_id}.",
+        batch_id=rec_res.batch_id if rec_res else None
     )
 
     return get_exception(exception_id, db)
@@ -733,11 +787,15 @@ def manual_match_exception(exception_id: str, req: ResolutionActionRequest, db: 
 # --- TRANSACTIONS & SETTLEMENTS ---
 
 @router.get("/transactions", response_model=List[TransactionSchema])
-def list_transactions(batch_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_transactions(
+    batch_id: Optional[str] = None,
+    limit: Optional[int] = Query(200, ge=1, le=10000),
+    db: Session = Depends(get_db),
+):
     q = db.query(Transaction)
     if batch_id:
         q = q.filter(Transaction.batch_id == batch_id)
-    return q.limit(200).all()
+    return q.limit(limit).all()
 
 @router.get("/transactions/{transaction_id}")
 def get_transaction_detail(transaction_id: str, db: Session = Depends(get_db)):
@@ -792,20 +850,30 @@ def get_transaction_detail(transaction_id: str, db: Session = Depends(get_db)):
     }
 
 @router.get("/settlements", response_model=List[SettlementSchema])
-def list_settlements(batch_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_settlements(
+    batch_id: Optional[str] = None,
+    limit: Optional[int] = Query(200, ge=1, le=10000),
+    db: Session = Depends(get_db),
+):
     q = db.query(Settlement)
     if batch_id:
         q = q.filter(Settlement.batch_id == batch_id)
-    return q.limit(200).all()
+    return q.limit(limit).all()
 
 # --- AUDIT LOGS ---
 
 @router.get("/audit-logs", response_model=List[AuditLogSchema])
-def list_audit_logs(entity_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_audit_logs(
+    entity_id: Optional[str] = None,
+    batch_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
     q = db.query(AuditLog)
     if entity_id:
         q = q.filter(AuditLog.entity_id == entity_id)
-    return q.order_by(AuditLog.created_at.desc()).limit(100).all()
+    if batch_id:
+        q = q.filter(AuditLog.batch_id == batch_id)
+    return q.order_by(AuditLog.created_at.desc()).limit(200).all()
 
 # --- EVALUATION ---
 

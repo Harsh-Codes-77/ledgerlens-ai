@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import TopBar from "@/components/Header";
+import { useSession } from "@/lib/session-context";
 import {
   fetchApi,
   Transaction,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/utils";
 
 export default function TransactionsPage() {
+  const { selectedBatchId } = useSession();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -50,11 +52,18 @@ export default function TransactionsPage() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
-    fetchApi<Transaction[]>("/api/transactions")
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (selectedBatchId) {
+      params.set("batch_id", selectedBatchId);
+      params.set("limit", "10000");
+    }
+    const qs = params.toString();
+    fetchApi<Transaction[]>(`/api/transactions${qs ? `?${qs}` : ""}`)
       .then(setTransactions)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedBatchId]);
 
   const filtered = useMemo(() => {
     return transactions.filter((t) => {

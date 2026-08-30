@@ -50,8 +50,17 @@ export default function Sidebar() {
     setMobileOpen(false);
   }, [pathname]);
 
-  const isActive = (href: string) =>
-    pathname === href || (href !== "/" && pathname.startsWith(href));
+  const activeHref = (() => {
+    let best: string | null = null;
+    for (const item of navItems) {
+      const { href } = item;
+      if (pathname === href) return href;
+      if (href !== "/" && pathname.startsWith(href + "/")) {
+        if (!best || href.length > best.length) best = href;
+      }
+    }
+    return best;
+  })();
 
   const sidebar = (
     <div className="flex flex-col h-full">
@@ -91,7 +100,7 @@ export default function Sidebar() {
       <nav className="flex-1 overflow-y-auto py-3 px-2">
         <div className={cn("space-y-0.5", collapsed && "space-y-1")}>
           {navItems.map((item) => {
-            const active = isActive(item.href);
+            const active = activeHref === item.href;
             const Icon = item.icon;
             return (
               <Link
@@ -109,11 +118,13 @@ export default function Sidebar() {
                 title={collapsed ? item.name : undefined}
               >
                 {active && (
-                  <motion.div
-                    layoutId="sidebar-active"
-                    className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full bg-emerald-500"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  />
+                  <span className="absolute inset-y-0 left-0 w-[3px] flex items-center">
+                    <motion.div
+                      layoutId="sidebar-active"
+                      className="h-5 w-full rounded-r-full bg-emerald-500"
+                      transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    />
+                  </span>
                 )}
                 <Icon className="h-4 w-4 shrink-0" />
                 {!collapsed && <span className="truncate">{item.name}</span>}

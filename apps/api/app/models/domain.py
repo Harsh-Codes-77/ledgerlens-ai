@@ -118,6 +118,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    batch_id = Column(String, nullable=True)  # NEW: link to batch
     entity_type = Column(String, nullable=False)  # batch, reconciliation, exception, system
     entity_id = Column(String, nullable=False)
     action = Column(String, nullable=False)  # INGEST, RECONCILE, AI_INVESTIGATE, AUTO_RESOLVE, HUMAN_APPROVE, HUMAN_REJECT, HUMAN_ESCALATE

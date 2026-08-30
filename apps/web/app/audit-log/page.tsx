@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import TopBar from "@/components/Header";
+import { useSession } from "@/lib/session-context";
 import { fetchApi, AuditLog } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,16 +12,21 @@ import { History, Cpu, User, Settings, Filter } from "lucide-react";
 import { formatDateTime } from "@/lib/utils";
 
 export default function AuditLogPage() {
+  const { selectedBatchId } = useSession();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [actorFilter, setActorFilter] = useState("");
 
   useEffect(() => {
-    fetchApi<AuditLog[]>("/api/audit-logs")
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (selectedBatchId) params.set("batch_id", selectedBatchId);
+    const qs = params.toString();
+    fetchApi<AuditLog[]>(`/api/audit-logs${qs ? `?${qs}` : ""}`)
       .then(setLogs)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedBatchId]);
 
   const filtered = useMemo(() => {
     if (!actorFilter) return logs;

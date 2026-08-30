@@ -98,6 +98,7 @@ export interface CandidateMatch {
 
 export interface ExceptionCase {
   id: string;
+  batch_id?: string;
   reconciliation_result_id: string;
   exception_type: string;
   severity: string;

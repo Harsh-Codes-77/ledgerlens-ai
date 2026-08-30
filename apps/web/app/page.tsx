@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import TopBar from "@/components/Header";
+import { useSession } from "@/lib/session-context";
 import { fetchApi, Batch, ExceptionCase } from "@/lib/api";
 import { MetricCard } from "@/components/ui/metric-card";
 import { EmptyState, LoadingState } from "@/components/ui/states";
@@ -39,24 +40,26 @@ const fadeUp = {
 };
 
 export default function OverviewPage() {
-  const [batches, setBatches] = useState<Batch[]>([]);
+  const { selectedBatchId, batches, refreshBatches } = useSession();
   const [exceptions, setExceptions] = useState<ExceptionCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [selectedBatchId]);
 
   async function loadData() {
     try {
       setLoading(true);
-      const [batchData, excData] = await Promise.all([
-        fetchApi<Batch[]>("/api/batches"),
-        fetchApi<ExceptionCase[]>("/api/exceptions"),
-      ]);
-      setBatches(batchData);
+      const params = new URLSearchParams();
+      if (selectedBatchId) params.set("batch_id", selectedBatchId);
+      const qs = params.toString();
+      const excData = await fetchApi<ExceptionCase[]>(
+        `/api/exceptions${qs ? `?${qs}` : ""}`
+      );
       setExceptions(excData);
+      if (!selectedBatchId) await refreshBatches();
     } catch (e) {
       console.error(e);
     } finally {
@@ -78,7 +81,7 @@ export default function OverviewPage() {
       await fetchApi<Batch>(`/api/batches/${newBatch.id}/process`, {
         method: "POST",
       });
-      await loadData();
+      await refreshBatches();
     } catch (e) {
       console.error(e);
     } finally {
@@ -86,18 +89,24 @@ export default function OverviewPage() {
     }
   }
 
+  // When a session is selected, scope to that batch; otherwise show everything
+  const scopedBatches = useMemo(() => {
+    if (selectedBatchId) return batches.filter((b) => b.id === selectedBatchId);
+    return batches;
+  }, [batches, selectedBatchId]);
+
   const stats = useMemo(() => {
-    const totalProcessed = batches.reduce((a, b) => a + b.total_records, 0);
-    const totalMatched = batches.reduce((a, b) => a + b.matched_count, 0);
-    const totalAutoResolved = batches.reduce(
+    const totalProcessed = scopedBatches.reduce((a, b) => a + b.total_records, 0);
+    const totalMatched = scopedBatches.reduce((a, b) => a + b.matched_count, 0);
+    const totalAutoResolved = scopedBatches.reduce(
       (a, b) => a + b.auto_resolved_count,
       0
     );
-    const totalEscalated = batches.reduce(
+    const totalEscalated = scopedBatches.reduce(
       (a, b) => a + b.escalated_count,
       0
     );
-    const totalExceptions = batches.reduce(
+    const totalExceptions = scopedBatches.reduce(
       (a, b) => a + b.exception_count,
       0
     );
@@ -125,9 +134,9 @@ export default function OverviewPage() {
       pendingReview,
       matchRate,
       avgConfidence,
-      batchCount: batches.length,
+      batchCount: scopedBatches.length,
     };
-  }, [batches, exceptions]);
+  }, [scopedBatches, exceptions]);
 
   if (loading) {
     return (
@@ -224,7 +233,7 @@ export default function OverviewPage() {
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between pb-3">
                   <CardTitle>Recent Runs</CardTitle>
-                  {batches.length > 0 && (
+                  {scopedBatches.length > 0 && (
                     <Link
                       href="/batches"
                       className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
@@ -235,15 +244,19 @@ export default function OverviewPage() {
                   )}
                 </CardHeader>
                 <CardContent>
-                  {batches.length === 0 ? (
+                  {scopedBatches.length === 0 ? (
                     <EmptyState
                       icon={<Layers className="h-5 w-5" />}
-                      title="No runs yet"
-                      description="Click 'Run Demo Batch' above to generate and reconcile 500 financial records."
+                      title={selectedBatchId ? "No data in this session" : "No runs yet"}
+                      description={
+                        selectedBatchId
+                          ? "This session has no batch data."
+                          : "Click 'Run Demo Batch' above to generate and reconcile 500 financial records."
+                      }
                     />
                   ) : (
                     <div className="space-y-2">
-                      {batches.slice(0, 5).map((b, i) => (
+                      {scopedBatches.slice(0, 5).map((b, i) => (
                         <motion.div
                           key={b.id}
                           initial={{ opacity: 0, x: -8 }}

@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import TopBar from "@/components/Header";
+import { useSession } from "@/lib/session-context";
 import { fetchApi, Settlement } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,16 +12,24 @@ import { Landmark, Search } from "lucide-react";
 import { formatCurrency, formatDateTime, getSourceColor } from "@/lib/utils";
 
 export default function SettlementsPage() {
+  const { selectedBatchId } = useSession();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetchApi<Settlement[]>("/api/settlements")
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (selectedBatchId) {
+      params.set("batch_id", selectedBatchId);
+      params.set("limit", "10000");
+    }
+    const qs = params.toString();
+    fetchApi<Settlement[]>(`/api/settlements${qs ? `?${qs}` : ""}`)
       .then(setSettlements)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedBatchId]);
 
   const filtered = useMemo(() => {
     if (!search) return settlements;
