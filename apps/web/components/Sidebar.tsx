@@ -20,6 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMobileNav } from "@/lib/mobile-nav-context";
 
 const navItems = [
   { name: "Command Center", href: "/", icon: LayoutDashboard },
@@ -37,7 +38,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const { open: mobileOpen, setOpen: setMobileOpen } = useMobileNav();
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -48,7 +49,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     setMobileOpen(false);
-  }, [pathname]);
+  }, [pathname, setMobileOpen]);
 
   const activeHref = (() => {
     let best: string | null = null;
@@ -183,51 +184,29 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile overlay */}
-      {isMobile && (
-        <>
-          <button
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="fixed top-3 left-3 z-50 h-9 w-9 rounded-md bg-card border border-border flex items-center justify-center md:hidden"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth={2}
-              stroke="currentColor"
+      {/* Mobile drawer */}
+      <AnimatePresence>
+        {mobileOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-40 md:hidden"
+              onClick={() => setMobileOpen(false)}
+            />
+            <motion.aside
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{ type: "spring", stiffness: 400, damping: 35 }}
+              className="fixed left-0 top-0 bottom-0 w-[260px] sm:w-[280px] bg-background border-r border-border z-50 md:hidden"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
-              />
-            </svg>
-          </button>
-          <AnimatePresence>
-            {mobileOpen && (
-              <>
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 bg-black/60 z-40 md:hidden"
-                  onClick={() => setMobileOpen(false)}
-                />
-                <motion.aside
-                  initial={{ x: -280 }}
-                  animate={{ x: 0 }}
-                  exit={{ x: -280 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 35 }}
-                  className="fixed left-0 top-0 bottom-0 w-[260px] bg-background border-r border-border z-50 md:hidden"
-                >
-                  {sidebar}
-                </motion.aside>
-              </>
-            )}
-          </AnimatePresence>
-        </>
-      )}
+              {sidebar}
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Desktop sidebar */}
       <aside

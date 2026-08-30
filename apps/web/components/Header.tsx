@@ -13,9 +13,11 @@ import {
   AlertTriangle,
   CheckCircle2,
   ArrowRight,
+  Menu,
 } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { useSession } from "@/lib/session-context";
+import { useMobileNav } from "@/lib/mobile-nav-context";
 import { fetchApi, ExceptionCase } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import GlobalSearch from "@/components/GlobalSearch";
@@ -64,7 +66,7 @@ function NotificationsMenu() {
     <Popover.Root>
       <Popover.Trigger asChild>
         <button
-          className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors relative"
+          className="h-10 w-10 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors relative"
           aria-label="Notifications"
         >
           <Bell className="h-4 w-4" />
@@ -82,7 +84,7 @@ function NotificationsMenu() {
         <Popover.Content
           sideOffset={8}
           align="end"
-          className="z-50 w-[360px] rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl shadow-black/40 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+          className="z-50 w-[calc(100vw-1.5rem)] max-w-[360px] rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl shadow-black/40 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -219,6 +221,7 @@ function ProfileMenu() {
 export default function TopBar({ title, className }: TopBarProps) {
   const pathname = usePathname();
   const { selectedBatchId, setSelectedBatchId, batches } = useSession();
+  const { setOpen: setMobileOpen } = useMobileNav();
   const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
@@ -242,24 +245,33 @@ export default function TopBar({ title, className }: TopBarProps) {
   return (
     <header
       className={cn(
-        "h-12 border-b border-border bg-background/80 backdrop-blur-sm px-6 flex items-center justify-between sticky top-0 z-20 shrink-0",
+        "h-12 border-b border-border bg-background/80 backdrop-blur-sm px-3 sm:px-6 flex items-center gap-2 sticky top-0 z-20 shrink-0",
         className
       )}
     >
-      <div className="flex items-center gap-3">
-        <h1 className="text-sm font-semibold tracking-tight">
+      {/* Left: mobile menu button + title */}
+      <div className="flex items-center gap-1 sm:gap-3 min-w-0 flex-1">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="md:hidden h-10 w-10 -ml-1 sm:-ml-2 shrink-0 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+          aria-label="Open navigation menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="text-sm font-semibold tracking-tight truncate">
           {getPageTitle()}
         </h1>
       </div>
 
-      <div className="flex items-center gap-2">
-        {/* Session/Batch Selector */}
+      {/* Right cluster */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Session/Batch Selector (desktop) */}
         {batches.length > 0 && (
-          <div className="relative">
+          <div className="relative hidden sm:block">
             <select
               value={selectedBatchId || ""}
               onChange={(e) => setSelectedBatchId(e.target.value || null)}
-              className="h-8 rounded-md border border-border bg-secondary/50 pl-3 pr-7 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer max-w-[200px]"
+              className="h-9 rounded-md border border-border bg-secondary/50 pl-3 pr-7 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-ring appearance-none cursor-pointer max-w-[180px] xl:max-w-[220px]"
             >
               <option value="">All Sessions</option>
               {batches.map((b) => (
@@ -272,7 +284,7 @@ export default function TopBar({ title, className }: TopBarProps) {
             {selectedBatchId && (
               <button
                 onClick={() => setSelectedBatchId(null)}
-                className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-muted-foreground/80 hover:bg-foreground flex items-center justify-center transition-colors"
+                className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-muted-foreground/80 hover:bg-foreground flex items-center justify-center transition-colors z-10"
                 title="Clear session filter"
               >
                 <X className="h-2.5 w-2.5 text-background" />
@@ -281,12 +293,12 @@ export default function TopBar({ title, className }: TopBarProps) {
           </div>
         )}
 
-        <div className="h-4 w-px bg-border mx-1" />
+        <div className="h-4 w-px bg-border mx-0.5 hidden sm:block" />
 
         {/* Global Search */}
         <button
           onClick={() => setSearchOpen(true)}
-          className="hidden sm:flex items-center gap-2 h-8 px-2.5 rounded-md border border-border bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+          className="hidden sm:flex items-center gap-2 h-9 px-2.5 rounded-md border border-border bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
           aria-label="Search records"
         >
           <Search className="h-4 w-4" />
@@ -299,16 +311,16 @@ export default function TopBar({ title, className }: TopBarProps) {
         </button>
         <button
           onClick={() => setSearchOpen(true)}
-          className="sm:hidden h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+          className="sm:hidden h-10 w-10 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           aria-label="Search records"
         >
-          <Search className="h-4 w-4" />
+          <Search className="h-5 w-5" />
         </button>
 
         {/* Notifications */}
         <NotificationsMenu />
 
-        <div className="h-4 w-px bg-border mx-1" />
+        <div className="h-4 w-px bg-border mx-0.5" />
 
         {/* Controller Profile */}
         <ProfileMenu />
