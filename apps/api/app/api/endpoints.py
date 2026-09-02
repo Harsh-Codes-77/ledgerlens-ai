@@ -1,6 +1,8 @@
 import os
 import json
 import time
+import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
@@ -9,10 +11,10 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import csv
 import io
-import json
-from typing import List, Optional
 
-from app.database.session import get_db
+logger = logging.getLogger(__name__)
+
+from app.database.session import get_db, SessionLocal
 from app.models.domain import (
     Batch, Transaction, Settlement, Refund, ReconciliationResult, ExceptionCase, AuditLog
 )
@@ -290,172 +292,221 @@ def process_batch(batch_id: str, db: Session = Depends(get_db)):
 
     batch.status = "PROCESSING"
     db.commit()
-
-    start_time = time.time()
-
-    txns = db.query(Transaction).filter(Transaction.batch_id == batch_id).all()
-    sets = db.query(Settlement).filter(Settlement.batch_id == batch_id).all()
-    rfs = db.query(Refund).all()
-
-    txn_dicts = [
-        {
-            "external_transaction_id": t.external_transaction_id,
-            "source": t.source,
-            "amount": t.amount,
-            "currency": t.currency,
-            "status": t.status,
-            "transaction_date": t.transaction_date.isoformat(),
-            "customer_reference": t.customer_reference,
-            "payment_reference": t.payment_reference
-        }
-        for t in txns
-    ]
-
-    set_dicts = [
-        {
-            "external_settlement_id": s.external_settlement_id,
-            "source": s.source,
-            "amount": s.amount,
-            "currency": s.currency,
-            "settlement_date": s.settlement_date.isoformat(),
-            "reference": s.reference,
-            "status": s.status
-        }
-        for s in sets
-    ]
-
-    rf_dicts = [
-        {
-            "external_refund_id": r.external_refund_id,
-            "transaction_reference": r.transaction_reference,
-            "amount": r.amount,
-            "currency": r.currency,
-            "refund_date": r.refund_date.isoformat()
-        }
-        for r in rfs
-    ]
-
-    engine = ReconciliationEngine()
-    rec_results = engine.process_batch(txn_dicts, set_dicts, rf_dicts)
-
-    investigator = AIExceptionInvestigator()
-
-    matched_cnt = 0
-    auto_resolved_cnt = 0
-    escalated_cnt = 0
-    exception_cnt = 0
-
-    # Phase 1: Deterministic reconciliation results (fast, local)
-    exception_payloads = []  # (item_index, payload) to investigate in parallel
-    rec_objs = []
-    for item in rec_results:
-        rec_obj = ReconciliationResult(
-            batch_id=batch.id,
-            source_record_id=item["source_record_id"],
-            matched_record_id=item["matched_record_id"],
-            match_type=item["match_type"],
-            status=item["status"],
-            confidence_score=item["confidence_score"],
-            amount_difference=item["amount_difference"],
-            date_difference=item["date_difference"],
-            decision=item["decision"],
-            reason=item["reason"]
-        )
-        db.add(rec_obj)
-        db.flush()
-        rec_objs.append(rec_obj)
-
-        if item["match_type"] in ["EXACT", "TOLERANCE"] and item["status"] == "MATCHED":
-            matched_cnt += 1
-
-        if item["decision"] == "AUTO_RESOLVE":
-            auto_resolved_cnt += 1
-            create_audit_entry(
-                db, entity_type="reconciliation", entity_id=rec_obj.id,
-                action="AUTO_RESOLVE", actor_type="system",
-                reason=item["reason"],
-                batch_id=batch_id
-            )
-
-        if item["status"] == "EXCEPTION":
-            exception_cnt += 1
-            exception_payloads.append((
-                rec_obj,
-                item,
-                {
-                    "transaction": next((t for t in txn_dicts if t["external_transaction_id"] == item["source_record_id"]), {}),
-                    "candidate_matches": item.get("candidate_matches", []),
-                    "exception_type": item["exception_type"],
-                    "deterministic_checks": {"match_type": item["match_type"], "confidence": item["confidence_score"]}
-                }
-            ))
-
-    # Phase 2: AI investigations in parallel (the main speed bottleneck was
-    # sequential per-exception HTTP calls to the AI provider). Run them
-    # concurrently to cut processing time dramatically.
-    db.commit()  # persist reconciliation results before parallel work
-
-    max_workers = min(8, len(exception_payloads)) if exception_payloads else 1
-    futures = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for rec_obj, item, ai_payload in exception_payloads:
-            f = executor.submit(investigator.investigate_exception, ai_payload)
-            futures[f] = (rec_obj, item)
-
-        for f in as_completed(futures):
-            rec_obj, item = futures[f]
-            ai_result = f.result()
-
-            case_status = "PENDING_REVIEW"
-            if ai_result.recommended_action == "auto_resolve" and ai_result.ai_confidence >= 0.95:
-                case_status = "AUTO_RESOLVED"
-                auto_resolved_cnt += 1
-            elif ai_result.recommended_action == "escalate":
-                case_status = "ESCALATED"
-                escalated_cnt += 1
-            else:
-                escalated_cnt += 1
-
-            exc_case = ExceptionCase(
-                reconciliation_result_id=rec_obj.id,
-                exception_type=ai_result.exception_type,
-                severity=item.get("severity", "MEDIUM"),
-                status=case_status,
-                ai_analysis=ai_result.model_dump(),
-                recommended_action=ai_result.recommended_action,
-                confidence_score=ai_result.ai_confidence
-            )
-            db.add(exc_case)
-
-            create_audit_entry(
-                db, entity_type="exception", entity_id=rec_obj.id,
-                action="AI_INVESTIGATE", actor_type="ai",
-                reason=ai_result.summary,
-                metadata_json=ai_result.model_dump(),
-                batch_id=batch_id
-            )
-
-    duration = time.time() - start_time
-    batch.status = "COMPLETED"
-    batch.total_records = len(txns)
-    batch.matched_count = matched_cnt
-    batch.auto_resolved_count = auto_resolved_cnt
-    batch.escalated_count = escalated_cnt
-    batch.exception_count = exception_cnt
-    batch.match_rate = round((matched_cnt / len(txns)) * 100.0, 2) if txns else 0.0
-    batch.processing_time_seconds = round(duration, 2)
-    batch.completed_at = datetime.now(timezone.utc)
-
-    db.commit()
     db.refresh(batch)
 
-    create_audit_entry(
-        db, entity_type="batch", entity_id=batch.id, action="RECONCILE",
-        actor_type="system", reason=f"Processed batch of {len(txns)} records in {duration:.2f}s.",
-        batch_id=batch.id
-    )
+    # Return immediately — processing runs in background
+    threading.Thread(target=_process_batch_worker, args=(batch_id,), daemon=True).start()
 
     return batch
+
+
+def _process_batch_worker(batch_id: str):
+    """Background worker: runs reconciliation + AI investigation in its own DB session."""
+    db = SessionLocal()
+    try:
+        batch = db.query(Batch).filter(Batch.id == batch_id).first()
+        if not batch:
+            logger.warning(f"Batch {batch_id} not found in background worker")
+            return
+
+        start_time = time.time()
+
+        txns = db.query(Transaction).filter(Transaction.batch_id == batch_id).all()
+        sets = db.query(Settlement).filter(Settlement.batch_id == batch_id).all()
+        rfs = db.query(Refund).all()
+
+        txn_dicts = [
+            {
+                "external_transaction_id": t.external_transaction_id,
+                "source": t.source,
+                "amount": t.amount,
+                "currency": t.currency,
+                "status": t.status,
+                "transaction_date": t.transaction_date.isoformat(),
+                "customer_reference": t.customer_reference,
+                "payment_reference": t.payment_reference
+            }
+            for t in txns
+        ]
+
+        set_dicts = [
+            {
+                "external_settlement_id": s.external_settlement_id,
+                "source": s.source,
+                "amount": s.amount,
+                "currency": s.currency,
+                "settlement_date": s.settlement_date.isoformat(),
+                "reference": s.reference,
+                "status": s.status
+            }
+            for s in sets
+        ]
+
+        rf_dicts = [
+            {
+                "external_refund_id": r.external_refund_id,
+                "transaction_reference": r.transaction_reference,
+                "amount": r.amount,
+                "currency": r.currency,
+                "refund_date": r.refund_date.isoformat()
+            }
+            for r in rfs
+        ]
+
+        engine = ReconciliationEngine()
+        rec_results = engine.process_batch(txn_dicts, set_dicts, rf_dicts)
+
+        investigator = AIExceptionInvestigator()
+
+        matched_cnt = 0
+        auto_resolved_cnt = 0
+        escalated_cnt = 0
+        exception_cnt = 0
+
+        # Phase 1: Deterministic reconciliation results
+        exception_payloads = []
+        rec_objs = []
+        for item in rec_results:
+            rec_obj = ReconciliationResult(
+                batch_id=batch.id,
+                source_record_id=item["source_record_id"],
+                matched_record_id=item["matched_record_id"],
+                match_type=item["match_type"],
+                status=item["status"],
+                confidence_score=item["confidence_score"],
+                amount_difference=item["amount_difference"],
+                date_difference=item["date_difference"],
+                decision=item["decision"],
+                reason=item["reason"]
+            )
+            db.add(rec_obj)
+            db.flush()
+            rec_objs.append(rec_obj)
+
+            if item["match_type"] in ["EXACT", "TOLERANCE"] and item["status"] == "MATCHED":
+                matched_cnt += 1
+
+            if item["decision"] == "AUTO_RESOLVE":
+                auto_resolved_cnt += 1
+                create_audit_entry(
+                    db, entity_type="reconciliation", entity_id=rec_obj.id,
+                    action="AUTO_RESOLVE", actor_type="system",
+                    reason=item["reason"],
+                    batch_id=batch_id
+                )
+
+            if item["status"] == "EXCEPTION":
+                exception_cnt += 1
+                exception_payloads.append((
+                    rec_obj,
+                    item,
+                    {
+                        "transaction": next((t for t in txn_dicts if t["external_transaction_id"] == item["source_record_id"]), {}),
+                        "candidate_matches": item.get("candidate_matches", []),
+                        "exception_type": item["exception_type"],
+                        "deterministic_checks": {"match_type": item["match_type"], "confidence": item["confidence_score"]}
+                    }
+                ))
+
+        # Phase 2: AI investigations in parallel with higher concurrency
+        db.commit()
+
+        max_workers = min(16, len(exception_payloads)) if exception_payloads else 1
+        futures = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for rec_obj, item, ai_payload in exception_payloads:
+                f = executor.submit(investigator.investigate_exception, ai_payload)
+                futures[f] = (rec_obj, item)
+
+            for f in as_completed(futures):
+                rec_obj, item = futures[f]
+                try:
+                    ai_result = f.result()
+                except Exception as e:
+                    logger.warning(f"AI investigation failed: {e}")
+                    ai_result = None
+
+                if ai_result is None:
+                    escalated_cnt += 1
+                    exc_case = ExceptionCase(
+                        reconciliation_result_id=rec_obj.id,
+                        exception_type=item.get("exception_type", "unknown"),
+                        severity=item.get("severity", "MEDIUM"),
+                        status="ESCALATED",
+                        recommended_action="escalate",
+                        confidence_score=0.0
+                    )
+                    db.add(exc_case)
+                    create_audit_entry(
+                        db, entity_type="exception", entity_id=rec_obj.id,
+                        action="AI_INVESTIGATE", actor_type="ai",
+                        reason="AI investigation failed, escalated to human.",
+                        batch_id=batch_id
+                    )
+                    continue
+
+                case_status = "PENDING_REVIEW"
+                if ai_result.recommended_action == "auto_resolve" and ai_result.ai_confidence >= 0.95:
+                    case_status = "AUTO_RESOLVED"
+                    auto_resolved_cnt += 1
+                elif ai_result.recommended_action == "escalate":
+                    case_status = "ESCALATED"
+                    escalated_cnt += 1
+                else:
+                    escalated_cnt += 1
+
+                exc_case = ExceptionCase(
+                    reconciliation_result_id=rec_obj.id,
+                    exception_type=ai_result.exception_type,
+                    severity=item.get("severity", "MEDIUM"),
+                    status=case_status,
+                    ai_analysis=ai_result.model_dump(),
+                    recommended_action=ai_result.recommended_action,
+                    confidence_score=ai_result.ai_confidence
+                )
+                db.add(exc_case)
+
+                create_audit_entry(
+                    db, entity_type="exception", entity_id=rec_obj.id,
+                    action="AI_INVESTIGATE", actor_type="ai",
+                    reason=ai_result.summary,
+                    metadata_json=ai_result.model_dump(),
+                    batch_id=batch_id
+                )
+
+        duration = time.time() - start_time
+        batch.status = "COMPLETED"
+        batch.total_records = len(txns)
+        batch.matched_count = matched_cnt
+        batch.auto_resolved_count = auto_resolved_cnt
+        batch.escalated_count = escalated_cnt
+        batch.exception_count = exception_cnt
+        batch.match_rate = round((matched_cnt / len(txns)) * 100.0, 2) if txns else 0.0
+        batch.processing_time_seconds = round(duration, 2)
+        batch.completed_at = datetime.now(timezone.utc)
+
+        db.commit()
+
+        create_audit_entry(
+            db, entity_type="batch", entity_id=batch.id, action="RECONCILE",
+            actor_type="system", reason=f"Processed batch of {len(txns)} records in {duration:.2f}s.",
+            batch_id=batch.id
+        )
+
+        logger.info(f"Batch {batch_id} completed in {duration:.2f}s")
+
+    except Exception as e:
+        logger.error(f"Background processing failed for batch {batch_id}: {e}")
+        try:
+            db.rollback()
+            batch = db.query(Batch).filter(Batch.id == batch_id).first()
+            if batch:
+                batch.status = "FAILED"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 @router.get("/batches/{batch_id}/results", response_model=List[ReconciliationResultSchema])
 def get_batch_results(batch_id: str, db: Session = Depends(get_db)):

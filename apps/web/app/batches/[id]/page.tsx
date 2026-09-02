@@ -42,10 +42,31 @@ export default function BatchDetailPage() {
       ]);
       setBatch(bData);
       setResults(rData);
+      // If still processing, poll
+      if (bData.status === "PROCESSING") {
+        pollBatch();
+      }
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function pollBatch() {
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const [bData, rData] = await Promise.all([
+          fetchApi<Batch>(`/api/batches/${batchId}`),
+          fetchApi<ReconciliationResult[]>(`/api/batches/${batchId}/results`),
+        ]);
+        setBatch(bData);
+        setResults(rData);
+        if (bData.status === "COMPLETED" || bData.status === "FAILED") return;
+      } catch {
+        // retry
+      }
     }
   }
 

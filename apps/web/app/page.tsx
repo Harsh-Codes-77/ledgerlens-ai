@@ -78,10 +78,23 @@ export default function OverviewPage() {
           record_count: 500,
         }),
       });
+      // Process returns immediately — poll until done
       await fetchApi<Batch>(`/api/batches/${newBatch.id}/process`, {
         method: "POST",
       });
-      await refreshBatches();
+      // Poll for completion
+      const pollBatch = async () => {
+        for (let i = 0; i < 120; i++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const b = await fetchApi<Batch>(`/api/batches/${newBatch.id}`);
+          if (b.status === "COMPLETED" || b.status === "FAILED") {
+            await refreshBatches();
+            return;
+          }
+        }
+        await refreshBatches();
+      };
+      await pollBatch();
     } catch (e) {
       console.error(e);
     } finally {

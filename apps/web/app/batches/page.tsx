@@ -57,6 +57,12 @@ export default function BatchesPage() {
         method: "POST",
       });
       setBatchName("");
+      // Poll for completion
+      for (let i = 0; i < 120; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const b = await fetchApi<Batch>(`/api/batches/${newBatch.id}`);
+        if (b.status === "COMPLETED" || b.status === "FAILED") break;
+      }
       await loadBatches();
     } catch (err) {
       console.error(err);
