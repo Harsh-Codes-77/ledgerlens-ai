@@ -938,33 +938,50 @@ def evaluate_batch(batch_id: str, db: Session = Depends(get_db)):
     exceptions = db.query(ExceptionCase).join(ReconciliationResult).filter(ReconciliationResult.batch_id == batch_id).all()
 
     total = len(results)
-    auto_resolved = sum(1 for r in results if r.decision == "AUTO_RESOLVE")
-    escalated = sum(1 for r in results if r.decision == "ESCALATE_TO_HUMAN")
-    recommend = sum(1 for r in results if r.decision == "RECOMMEND_ACTION")
+    correct_matches = sum(1 for r in results if r.match_type in ["EXACT", "TOLERANCE"] and r.status == "MATCHED")
+    incorrect_matches = sum(1 for r in results if r.match_type in ["EXACT", "TOLERANCE"] and r.status != "MATCHED")
+    false_positives = sum(1 for r in results if r.decision == "AUTO_RESOLVE" and r.status == "EXCEPTION")
+    false_negatives = sum(1 for r in results if r.decision == "ESCALATE_TO_HUMAN" and r.status == "MATCHED")
+
+    # Match type breakdown
+    match_type_accuracy = {}
+    for r in results:
+        mt = r.match_type
+        match_type_accuracy[mt] = match_type_accuracy.get(mt, 0) + 1
+
+    # Resolution distribution from exception cases
+    resolution_distribution = {}
+    for exc in exceptions:
+        action = exc.status or "UNKNOWN"
+        resolution_distribution[action] = resolution_distribution.get(action, 0) + 1
+
+    # Escalation precision: correct escalations / total escalations
+    escalated_cases = [e for e in exceptions if e.status in ["ESCALATED", "PENDING_REVIEW"]]
+    correct_escalations = len(escalated_cases)
+    escalation_precision = round((correct_escalations / len(exceptions) * 100), 1) if exceptions else 0.0
 
     return {
         "batch_id": batch_id,
         "total_records": total,
-        "matched_count": batch.matched_count,
-        "auto_resolved": auto_resolved,
-        "escalated": escalated,
-        "recommended": recommend,
-        "accuracy": round(batch.matched_count / total, 4) if total > 0 else 0.0,
-        "auto_resolution_rate": round(auto_resolved / total, 4) if total > 0 else 0.0,
-        "escalation_rate": round(escalated / total, 4) if total > 0 else 0.0,
-        "processing_time_seconds": batch.processing_time_seconds,
+        "correct_matches": correct_matches,
+        "incorrect_matches": incorrect_matches,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "escalation_precision": escalation_precision,
+        "match_type_accuracy": match_type_accuracy,
+        "resolution_distribution": resolution_distribution,
         "known_failures": [
             {
-                "case": "Duplicate Gateway Callbacks",
+                "type": "Duplicate Gateway Callbacks",
+                "description": "Multiple candidates detected with identical amounts & dates.",
                 "expected": "Escalate to Human Review",
-                "actual": "Escalated (AMBIGUOUS)",
-                "reason": "Multiple candidates detected with identical amounts & dates."
+                "got": "Escalated (AMBIGUOUS)"
             },
             {
-                "case": "Corrupted Data Record",
+                "type": "Corrupted Data Record",
+                "description": "Negative amount validation failure triggered Stage 1 exception.",
                 "expected": "Escalate (INVALID)",
-                "actual": "Escalated",
-                "reason": "Negative amount validation failure triggered Stage 1 exception."
+                "got": "Escalated"
             }
         ]
     }
