@@ -22,7 +22,7 @@ from app.schemas.domain import (
 )
 from app.reconciliation.engine import ReconciliationEngine
 from app.ai.investigator import AIExceptionInvestigator
-from scripts.generate_dataset import generate_dataset
+from app.utils.dataset_generator import generate_dataset
 
 router = APIRouter()
 
