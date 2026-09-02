@@ -12,12 +12,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="min-h-screen bg-background text-foreground antialiased">
+      <body className="bg-background text-foreground antialiased">
         <SessionProvider>
           <MobileNavProvider>
-            <div className="flex min-h-screen max-w-[100vw] overflow-x-hidden">
+            <div className="flex h-screen max-w-[100vw] overflow-hidden">
               <Sidebar />
-              <div className="flex-1 flex flex-col min-w-0">
+              <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
                 {children}
               </div>
             </div>
