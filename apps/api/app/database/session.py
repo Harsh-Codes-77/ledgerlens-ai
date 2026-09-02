@@ -30,3 +30,10 @@ def init_db():
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE audit_logs ADD COLUMN batch_id VARCHAR"))
                 conn.commit()
+    # Lightweight migration: add refunds.batch_id if missing
+    if "refunds" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("refunds")}
+        if "batch_id" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE refunds ADD COLUMN batch_id VARCHAR"))
+                conn.commit()

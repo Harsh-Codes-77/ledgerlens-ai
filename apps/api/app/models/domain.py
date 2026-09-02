@@ -28,6 +28,7 @@ class Batch(Base):
     results = relationship("ReconciliationResult", back_populates="batch", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="batch", cascade="all, delete-orphan")
     settlements = relationship("Settlement", back_populates="batch", cascade="all, delete-orphan")
+    refunds = relationship("Refund", back_populates="batch", cascade="all, delete-orphan")
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -68,6 +69,7 @@ class Refund(Base):
     __tablename__ = "refunds"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    batch_id = Column(String, ForeignKey("batches.id"), nullable=True)
     external_refund_id = Column(String, index=True, nullable=False)
     transaction_reference = Column(String, nullable=False, index=True)
     amount = Column(Float, nullable=False)
@@ -75,6 +77,8 @@ class Refund(Base):
     refund_date = Column(DateTime, nullable=False)
     status = Column(String, default="processed")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    batch = relationship("Batch", back_populates="refunds")
 
 class ReconciliationResult(Base):
     __tablename__ = "reconciliation_results"

@@ -20,7 +20,7 @@ from app.models.domain import (
 )
 from app.schemas.domain import (
     BatchSchema, BatchCreateRequest, ReconciliationResultSchema, ExceptionCaseSchema,
-    TransactionSchema, SettlementSchema, AuditLogSchema, ResolutionActionRequest
+    TransactionSchema, SettlementSchema, RefundSchema, AuditLogSchema, ResolutionActionRequest
 )
 from app.reconciliation.engine import ReconciliationEngine
 from app.ai.investigator import AIExceptionInvestigator
@@ -54,7 +54,6 @@ def create_audit_entry(
         batch_id=batch_id
     )
     db.add(audit)
-    db.commit()
 
 @router.get("/health")
 def health_check():
@@ -118,6 +117,7 @@ def create_batch(req: BatchCreateRequest, db: Session = Depends(get_db)):
         for r in dataset["refunds"]:
             r_dt = datetime.fromisoformat(r["refund_date"])
             ref_objs.append(Refund(
+                batch_id=batch.id,
                 external_refund_id=r["external_refund_id"],
                 transaction_reference=r["transaction_reference"],
                 amount=r["amount"],
@@ -234,6 +234,7 @@ async def upload_batch(
         for r in ref_data:
             r_dt = datetime.fromisoformat(r["refund_date"])
             ref_objs.append(Refund(
+                batch_id=batch.id,
                 external_refund_id=r["external_refund_id"],
                 transaction_reference=r["transaction_reference"],
                 amount=float(r["amount"]),
@@ -273,16 +274,35 @@ def delete_batch(batch_id: str, db: Session = Depends(get_db)):
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
 
-    create_audit_entry(
-        db, entity_type="batch", entity_id=batch_id, action="DELETE",
-        actor_type="user", reason=f"Batch '{batch.name}' and all associated data deleted by user.",
-        batch_id=batch_id
-    )
+    if batch.status == "PROCESSING":
+        raise HTTPException(status_code=409, detail="Cannot delete a batch while it is being processed. Wait for it to complete or fail.")
 
-    db.delete(batch)
-    db.commit()
+    try:
+        db.query(ExceptionCase).filter(
+            ExceptionCase.reconciliation_result_id.in_(
+                db.query(ReconciliationResult.id).filter(ReconciliationResult.batch_id == batch_id)
+            )
+        ).delete(synchronize_session="fetch")
 
-    return {"message": f"Batch '{batch.name}' and all associated data deleted successfully"}
+        db.query(ReconciliationResult).filter(ReconciliationResult.batch_id == batch_id).delete(synchronize_session="fetch")
+        db.query(Transaction).filter(Transaction.batch_id == batch_id).delete(synchronize_session="fetch")
+        db.query(Settlement).filter(Settlement.batch_id == batch_id).delete(synchronize_session="fetch")
+        db.query(Refund).filter(Refund.batch_id == batch_id).delete(synchronize_session="fetch")
+
+        create_audit_entry(
+            db, entity_type="batch", entity_id=batch_id, action="DELETE",
+            actor_type="user", reason=f"Batch '{batch.name}' and all associated data deleted by user.",
+            batch_id=batch_id
+        )
+
+        db.delete(batch)
+        db.commit()
+
+        return {"message": f"Batch '{batch.name}' and all associated data deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to delete batch {batch_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete batch: {str(e)}")
 
 @router.post("/batches/{batch_id}/process", response_model=BatchSchema)
 def process_batch(batch_id: str, db: Session = Depends(get_db)):

@@ -35,6 +35,7 @@ class SettlementSchema(BaseModel):
 
 class RefundSchema(BaseModel):
     id: Optional[str] = None
+    batch_id: Optional[str] = None
     external_refund_id: str
     transaction_reference: str
     amount: float
@@ -73,7 +74,7 @@ class ExceptionCaseSchema(BaseModel):
     timeline: Optional[List[Dict[str, Any]]] = None
     next_pending_id: Optional[str] = None
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

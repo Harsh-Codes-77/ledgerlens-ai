@@ -74,11 +74,12 @@ export default function BatchesPage() {
   async function handleDeleteBatch(batchId: string) {
     try {
       await fetchApi(`/api/batches/${batchId}`, { method: "DELETE" });
-      await loadBatches();
       setDeletingId(null);
       setDeleteConfirm("");
-    } catch (err) {
+      await loadBatches();
+    } catch (err: any) {
       console.error(err);
+      alert(err?.message || "Failed to delete batch. Please try again.");
     }
   }
 

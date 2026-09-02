@@ -58,6 +58,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     refreshBatches();
   }, []);
 
+  useEffect(() => {
+    if (!loadingBatches && selectedBatchId && batches.length > 0) {
+      const exists = batches.some((b) => b.id === selectedBatchId);
+      if (!exists) {
+        setSelectedBatchIdState(null);
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+  }, [loadingBatches, selectedBatchId, batches]);
+
   const selectedBatch = batches.find((b) => b.id === selectedBatchId) || null;
 
   return (
